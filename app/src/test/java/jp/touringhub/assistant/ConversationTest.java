@@ -38,6 +38,16 @@ public class ConversationTest {
         assertEquals(0, host.launches); assertTrue(host.prompt.contains(OTHER.address()));
         c.heard("はい"); assertEquals(OTHER, host.destination);
     }
+    @Test public void proximityFilteredSingleResultSkipsNumberChoiceButRequiresConfirmation() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination shop = new Destination("施設内店舗", "山梨県道志村", 35.5001, 139.0);
+        c.start(); c.heard("道の駅どうしに行きたい");
+        c.found(host.request, CandidateRanking.select(List.of(DOSHI, shop), null));
+        assertEquals(Conversation.State.CONFIRM, c.state());
+        assertTrue(host.shown.isEmpty()); assertFalse(host.prompt.contains("何番"));
+        assertTrue(host.prompt.contains("道の駅どうし")); assertEquals(0, host.launches);
+        c.heard("はい"); assertEquals(DOSHI, host.destination); assertEquals(1, host.launches);
+    }
     @Test public void rejectedDestinationCannotBeLaunched() {
         Fake host = new Fake(); Conversation c = new Conversation(host);
         c.start(); c.heard("どうし"); c.found(host.request, List.of(DOSHI));

@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 
 final class CandidateRanking {
+    private static final double MIN_SEPARATION_METERS = 1000;
     record Origin(double latitude, double longitude) {
         Origin {
             if (!Double.isFinite(latitude) || !Double.isFinite(longitude)
@@ -37,6 +38,21 @@ final class CandidateRanking {
         }
         List<Destination> ranked = new ArrayList<>(unique.values());
         if (origin != null) ranked.sort(Comparator.comparingDouble(origin::distanceTo));
-        return List.copyOf(ranked.subList(0, Math.min(Conversation.MAX_CANDIDATES, ranked.size())));
+        List<Destination> selected = new ArrayList<>();
+        for (Destination candidate : ranked) {
+            boolean nearby = false;
+            // Compare against every accepted candidate, never against rejected results.
+            for (Destination accepted : selected) {
+                if (new Origin(accepted.latitude(), accepted.longitude()).distanceTo(candidate)
+                        < MIN_SEPARATION_METERS) {
+                    nearby = true;
+                    break;
+                }
+            }
+            if (nearby) continue;
+            selected.add(candidate);
+            if (selected.size() == Conversation.MAX_CANDIDATES) break;
+        }
+        return List.copyOf(selected);
     }
 }
