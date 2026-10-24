@@ -11,8 +11,9 @@ import java.util.function.Consumer;
 
 /** Owns communication routing only for the duration of a foreground conversation. */
 public final class AudioRouter implements AutoCloseable {
-    public static AudioAttributes voiceAttributes() {
-        return new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+    public AudioAttributes speechAttributes() {
+        return new AudioAttributes.Builder().setUsage(useBluetooth
+                        ? AudioAttributes.USAGE_VOICE_COMMUNICATION : AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
     }
     private final AudioManager manager;
@@ -28,6 +29,7 @@ public final class AudioRouter implements AutoCloseable {
     private int targetId = -1;
     private boolean owned;
     private boolean ready;
+    private boolean useBluetooth;
     private Runnable timeout;
     public AudioRouter(Context context, Handler handler) {
         manager = context.getSystemService(AudioManager.class);
@@ -37,6 +39,7 @@ public final class AudioRouter implements AutoCloseable {
         if (manager.getMode() != AudioManager.MODE_NORMAL) {
             onFailure.accept("通話中などのため音声を使用できません。通話を終了してから開始してください。"); return;
         }
+        useBluetooth = bluetooth;
         AudioDeviceInfo target = null;
         for (AudioDeviceInfo device : manager.getAvailableCommunicationDevices()) {
             if (bluetooth && (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
@@ -52,7 +55,7 @@ public final class AudioRouter implements AutoCloseable {
         focusLease = new AudioFocusLease(new AudioFocusLease.Backend() {
             @Override public boolean request(Runnable onLoss) {
                 focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                        .setAudioAttributes(voiceAttributes()).setOnAudioFocusChangeListener(change -> {
+                        .setAudioAttributes(speechAttributes()).setOnAudioFocusChangeListener(change -> {
                             if (change < 0) onLoss.run();
                         }, handler).build();
                 return manager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
@@ -68,11 +71,18 @@ public final class AudioRouter implements AutoCloseable {
         // We yield focus to the recognition service during capture. Calls must still stop
         // the conversation in that interval, without mistaking recognition's focus for a call.
         modeListener = mode -> {
-            if (owned && isTelephoneMode(mode)) {
+            if (owned && isInterruptingMode(mode, useBluetooth)) {
                 onFailure.accept("電話の着信や通話のため、会話を終了しました。");
             }
         };
         manager.addOnModeChangedListener(handler::post, modeListener);
+        if (!useBluetooth) {
+            // TTS is not a phone call. Keep the handset in its normal playback mode;
+            // communication-route expiry/recovery can otherwise interrupt its audio.
+            ready = true;
+            onReady.run();
+            return;
+        }
         targetId = target.getId();
         routeGuard = new CommunicationRouteGuard(new CommunicationRouteGuard.Backend() {
             @Override public boolean targetAvailable() { return findTarget() != null; }
@@ -138,9 +148,12 @@ public final class AudioRouter implements AutoCloseable {
                 || mode == AudioManager.MODE_CALL_SCREENING || mode == AudioManager.MODE_CALL_REDIRECT
                 || mode == AudioManager.MODE_COMMUNICATION_REDIRECT;
     }
+    static boolean isInterruptingMode(int mode, boolean bluetooth) {
+        return isTelephoneMode(mode) || (!bluetooth && mode == AudioManager.MODE_IN_COMMUNICATION);
+    }
     private boolean canUseAudio() {
         if (!owned) return false;
-        if (isTelephoneMode(manager.getMode())) {
+        if (isInterruptingMode(manager.getMode(), useBluetooth)) {
             failure.accept("電話の着信や通話のため、会話を終了しました。");
             return false;
         }
@@ -170,9 +183,9 @@ public final class AudioRouter implements AutoCloseable {
         if (focusLease != null) focusLease.close();
         if (modeListener != null) manager.removeOnModeChangedListener(modeListener);
         if (listener != null) manager.removeOnCommunicationDeviceChangedListener(listener);
-        manager.clearCommunicationDevice();
+        if (useBluetooth) manager.clearCommunicationDevice();
         // Remove our mode request even if Android has temporarily made it inactive.
         // A real phone call's higher-priority mode remains owned by Telecom.
-        manager.setMode(oldMode);
+        if (useBluetooth) manager.setMode(oldMode);
     }
 }

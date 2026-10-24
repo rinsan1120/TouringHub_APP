@@ -38,7 +38,8 @@ public final class DestinationResolver {
                     }
                     // Never confirm a location with no address to distinguish similarly named facilities.
                     if (line.isBlank()) continue;
-                    Destination destination = new Destination(name, line, address.getLatitude(), address.getLongitude());
+                    String area = Destination.area(address.getAdminArea(), address.getLocality(), address.getSubLocality());
+                    Destination destination = new Destination(name, line, address.getLatitude(), address.getLongitude(), area);
                     if (!results.contains(destination)) results.add(destination);
                 }
                 // Backend callbacks can arrive off the UI thread. The Activity owns all cache access.

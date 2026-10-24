@@ -21,7 +21,7 @@ public final class Conversation {
     public State state() { return state; }
     public void start() {
         if (state != State.IDLE) return;
-        askDestination("どこへ行きたいですか。施設名や住所を話してください。中止するときは、キャンセルと言ってください。");
+        askDestination("どこへ行きたいですか。中止する場合はキャンセルと言ってください。");
     }
     private void say(String text) { lastPrompt = text; host.prompt(text); }
     private void askDestination(String text) {
@@ -43,7 +43,7 @@ public final class Conversation {
             } else if (JapaneseInput.no(text)) {
                 askDestination("目的地を言い直してください。地域名も付けると探しやすくなります。");
             } else {
-                say("まだ確定していません。" + selected.spokenLabel() + "でよいですか。はい、または、違う、と答えてください。");
+                say("まだ確定していません。" + confirmationPrompt());
             }
             return;
         }
@@ -90,7 +90,10 @@ public final class Conversation {
     private void confirm(Destination destination) {
         selected = destination;
         state = State.CONFIRM;
-        say("目的地は、" + selected.spokenLabel() + "。ここでよいですか。はい、または、違う、と答えてください。");
+        say(confirmationPrompt());
+    }
+    private String confirmationPrompt() {
+        return selected.confirmationLabel() + "、でよろしいですか。はい、または、違う、とお答えください。";
     }
     public void retry() {
         if (state != State.IDLE && state != State.SEARCHING && state != State.FINISHED) {

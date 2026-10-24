@@ -5,7 +5,7 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class ConversationTest {
-    private static final Destination DOSHI = new Destination("道の駅どうし", "山梨県南都留郡道志村", 35.5, 139.0);
+    private static final Destination DOSHI = new Destination("道の駅どうし", "山梨県南都留郡道志村", 35.5, 139.0, "山梨県道志村");
     private static final Destination OTHER = new Destination("同名施設", "静岡県御殿場市", 35.3, 138.9);
     private static final class Fake implements Conversation.Host {
         String prompt, query, finish;
@@ -22,7 +22,7 @@ public class ConversationTest {
         assertEquals("道の駅どうし", host.query);
         c.heard("はい"); assertEquals(0, host.launches); // no confirmation before search
         c.found(host.request, List.of(DOSHI));
-        assertTrue(host.prompt.contains(DOSHI.address()));
+        assertEquals("山梨県道志村の道の駅どうし、でよろしいですか。はい、または、違う、とお答えください。", host.prompt);
         for (String unsafe : List.of("はい、違います", "はいじゃない", "多分", "はい山梨ではない")) c.heard(unsafe);
         assertEquals(0, host.launches);
         c.heard("はい"); c.heard("はい");

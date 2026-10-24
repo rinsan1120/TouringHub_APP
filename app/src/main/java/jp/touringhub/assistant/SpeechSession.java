@@ -52,7 +52,6 @@ public final class SpeechSession implements AutoCloseable {
             if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
                 events.fatal("日本語の読み上げデータがありません。端末の音声合成設定を確認してください。"); return;
             }
-            tts.setAudioAttributes(AudioRouter.voiceAttributes());
             tts.setSpeechRate(1.0f);
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String id) {}
@@ -68,6 +67,7 @@ public final class SpeechSession implements AutoCloseable {
         if (closed) return;
         destroyRecognizer();
         if (!router.prepareSpeech() || closed) return;
+        tts.setAudioAttributes(router.speechAttributes());
         if (speechTimeout != null) handler.removeCallbacks(speechTimeout);
         afterSpeech = next;
         String id = Integer.toString(++utterance);

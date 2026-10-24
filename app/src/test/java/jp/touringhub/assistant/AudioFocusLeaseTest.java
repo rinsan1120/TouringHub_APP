@@ -71,4 +71,11 @@ public class AudioFocusLeaseTest {
         assertFalse(AudioRouter.isTelephoneMode(android.media.AudioManager.MODE_NORMAL));
         assertFalse(AudioRouter.isTelephoneMode(android.media.AudioManager.MODE_IN_COMMUNICATION));
     }
+    @Test public void handsetStopsForVoipWhileBluetoothOwnCommunicationModeIsAllowed() {
+        assertTrue(AudioRouter.isInterruptingMode(android.media.AudioManager.MODE_IN_COMMUNICATION, false));
+        assertFalse(AudioRouter.isInterruptingMode(android.media.AudioManager.MODE_IN_COMMUNICATION, true));
+        assertTrue(AudioRouter.isInterruptingMode(android.media.AudioManager.MODE_RINGTONE, false));
+        assertTrue(AudioRouter.isInterruptingMode(android.media.AudioManager.MODE_RINGTONE, true));
+        assertFalse(AudioRouter.isInterruptingMode(android.media.AudioManager.MODE_NORMAL, false));
+    }
 }
