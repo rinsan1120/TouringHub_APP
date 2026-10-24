@@ -3,6 +3,7 @@ package jp.touringhub.assistant;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
+import android.media.AudioDeviceCallback;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.os.Handler;
@@ -20,6 +21,8 @@ public final class AudioRouter implements AutoCloseable {
     private AudioFocusLease focusLease;
     private AudioManager.OnCommunicationDeviceChangedListener listener;
     private AudioManager.OnModeChangedListener modeListener;
+    private AudioDeviceCallback deviceListener;
+    private CommunicationRouteGuard routeGuard;
     private Consumer<String> failure;
     private int oldMode;
     private int targetId = -1;
@@ -71,16 +74,46 @@ public final class AudioRouter implements AutoCloseable {
         };
         manager.addOnModeChangedListener(handler::post, modeListener);
         targetId = target.getId();
+        routeGuard = new CommunicationRouteGuard(new CommunicationRouteGuard.Backend() {
+            @Override public boolean targetAvailable() { return findTarget() != null; }
+            @Override public boolean targetSelected() {
+                AudioDeviceInfo device = manager.getCommunicationDevice();
+                return device != null && device.getId() == targetId;
+            }
+            @Override public boolean restoreTarget() {
+                if (!canUseAudio()) return false;
+                AudioDeviceInfo device = findTarget();
+                if (device == null) return false;
+                // Android may expire an inactive communication route while TTS is playing
+                // in another process. Restore only the original, still-connected device.
+                manager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                return manager.setCommunicationDevice(device);
+            }
+            @Override public void scheduleCheck(Runnable check) { handler.postDelayed(check, 1500); }
+            @Override public void cancelCheck(Runnable check) { handler.removeCallbacks(check); }
+        }, () -> {
+            if (owned) onFailure.accept("音声の接続が切れたため、会話を終了しました。接続を確認してください。");
+        });
+        deviceListener = new AudioDeviceCallback() {
+            @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] devices) {
+                if (!owned) return;
+                for (AudioDeviceInfo device : devices) {
+                    if (device.getId() == targetId) { routeGuard.removed(); return; }
+                }
+            }
+        };
+        manager.registerAudioDeviceCallback(deviceListener, handler);
         listener = device -> {
             if (!owned) return;
             if (device != null && device.getId() == targetId) {
+                routeGuard.changed(true);
                 if (!ready) {
                     ready = true;
                     if (timeout != null) handler.removeCallbacks(timeout);
                     onReady.run();
                 }
             } else if (ready) {
-                onFailure.accept("音声の接続が切れたため、会話を終了しました。接続を確認してください。");
+                routeGuard.changed(false);
             }
         };
         manager.addOnCommunicationDeviceChangedListener(handler::post, listener);
@@ -93,6 +126,12 @@ public final class AudioRouter implements AutoCloseable {
         };
         handler.postDelayed(timeout, 6000);
         listener.onCommunicationDeviceChanged(manager.getCommunicationDevice());
+    }
+    private AudioDeviceInfo findTarget() {
+        for (AudioDeviceInfo device : manager.getAvailableCommunicationDevices()) {
+            if (device.getId() == targetId) return device;
+        }
+        return null;
     }
     static boolean isTelephoneMode(int mode) {
         return mode == AudioManager.MODE_RINGTONE || mode == AudioManager.MODE_IN_CALL
@@ -126,6 +165,8 @@ public final class AudioRouter implements AutoCloseable {
         if (timeout != null) handler.removeCallbacks(timeout);
         if (!owned) return;
         owned = false;
+        if (routeGuard != null) routeGuard.close();
+        if (deviceListener != null) manager.unregisterAudioDeviceCallback(deviceListener);
         if (focusLease != null) focusLease.close();
         if (modeListener != null) manager.removeOnModeChangedListener(modeListener);
         if (listener != null) manager.removeOnCommunicationDeviceChangedListener(listener);
