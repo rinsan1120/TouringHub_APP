@@ -1,0 +1,7 @@
+<resources>
+    <string name="bluetooth_mode">Bluetoothインカムを使う</string>
+    <string name="google_mode">Google マップで案内</string>
+    <string name="movilink_mode">moviLinkへ共有（停車中のみ）</string>
+    <string name="geocoder_missing">端末に地名検索サービスがありません。Googleのサービスと端末設定を確認してください。</string>
+    <string name="heard">聞き取り：%1$s</string>
+</resources>
