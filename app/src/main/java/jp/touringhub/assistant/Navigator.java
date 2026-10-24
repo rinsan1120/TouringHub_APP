@@ -12,9 +12,9 @@ public final class Navigator {
     public static Intent intent(Destination destination, boolean movilink) {
         if (movilink) {
             String url = new Uri.Builder().scheme("https").authority("www.google.com")
-                    .path("maps/search/").appendQueryParameter("api", "1")
-                    .appendQueryParameter("query", destination.coordinates()).build().toString();
-            // moviLink documents receiving shared facilities, but does not publish a direct navigation API.
+                    .path("maps/place/" + destination.coordinates()).build().toString();
+            // moviLink 4.0.0 accepts coordinates in the place path, but rejects Maps URLs'
+            // /maps/search/?api=1&query=... format. Keep the confirmed coordinates intact.
             return new Intent(Intent.ACTION_SEND).setType("text/plain").setPackage(MOVILINK)
                     .putExtra(Intent.EXTRA_SUBJECT, destination.name())
                     .putExtra(Intent.EXTRA_TEXT, destination.spokenLabel() + "\n" + url);
