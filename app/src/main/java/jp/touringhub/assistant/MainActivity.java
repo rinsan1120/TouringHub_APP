@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Rect;
+import android.text.method.LinkMovementMethod;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,6 +21,8 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MainActivity extends Activity {
     private static final int MINT = Color.rgb(102, 227, 196);
@@ -27,6 +31,8 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView status;
     private TextView transcript;
+    private TextView locationStatus;
+    private LinearLayout candidateList;
     private Button start;
     private CheckBox bluetooth;
     private RadioGroup navigation;
@@ -36,6 +42,7 @@ public final class MainActivity extends Activity {
     private SpeechSession speech;
     private AudioRouter router;
     private DestinationResolver resolver;
+    private NearbyLocation nearbyLocation;
     private Runnable sessionTimeout;
     private Runnable initTimeout;
     private Runnable searchTimeout;
@@ -48,6 +55,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         resolver = new DestinationResolver(this);
+        nearbyLocation = new NearbyLocation(this, handler);
         buildScreen();
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -77,7 +85,7 @@ public final class MainActivity extends Activity {
         TextView title = text("次の目的地を、\n声で決めよう。", 30, WHITE);
         title.setTypeface(null, Typeface.BOLD);
         content.addView(title);
-        content.addView(text("停車中に準備して開始してください。\n会話中は画面が点灯し、聞き取りが自動で続きます。", 15, MUTED));
+        content.addView(text("停車中に準備して開始してください。\nアプリの表示中は画面が点灯し、会話の聞き取りは自動で続きます。", 15, MUTED));
 
         bluetooth = new CheckBox(this);
         bluetooth.setText(R.string.bluetooth_mode);
@@ -109,19 +117,40 @@ public final class MainActivity extends Activity {
         });
         status = text("待機中", 20, MINT); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         content.addView(status);
+        candidateList = new LinearLayout(this);
+        candidateList.setOrientation(LinearLayout.VERTICAL);
+        candidateList.setVisibility(View.GONE);
+        content.addView(candidateList);
+        locationStatus = text(getString(R.string.location_explanation), 13, MUTED);
+        content.addView(locationStatus);
         transcript = text("例：「山梨県の道の駅どうしに行きたい」\n確認：「はい」「違う」\n候補選択：「1番」／終了：「キャンセル」", 16, WHITE);
         content.addView(transcript);
         TextView note = text("moviLinkは施設共有まで対応。共有後のルート操作は停車中に行ってください。\n検索候補は網羅的ではありません。復唱された施設名と住所を確認してください。\nロック・別アプリへの切替で会話を終了します。1回の会話は最大3分です。\n有料API・サブスクリプションなし。通信料は契約に従います。音声・検索語は端末のサービスに送信される場合があります。", 12, MUTED);
         content.addView(note);
+        TextView attribution = text("", 12, MUTED);
+        attribution.setText(android.text.Html.fromHtml(getString(R.string.search_attribution), android.text.Html.FROM_HTML_MODE_LEGACY));
+        attribution.setMovementMethod(LinkMovementMethod.getInstance());
+        attribution.setLinkTextColor(MINT);
+        content.addView(attribution);
         setContentView(scroll);
     }
     private void requestStart() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-                || (bluetooth.isChecked() && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)) {
-            String[] permissions = bluetooth.isChecked()
-                    ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.BLUETOOTH_CONNECT}
-                    : new String[]{Manifest.permission.RECORD_AUDIO};
-            requestPermissions(permissions, 10);
+        List<String> permissions = new ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.RECORD_AUDIO);
+        if (bluetooth.isChecked() && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && !getPreferences(MODE_PRIVATE).getBoolean("location_requested", false)) {
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+            getPreferences(MODE_PRIVATE).edit().putBoolean("location_requested", true).apply();
+        }
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && !getPreferences(MODE_PRIVATE).getBoolean("fine_location_requested", false)) {
+            if (!permissions.contains(Manifest.permission.ACCESS_COARSE_LOCATION)) permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            getPreferences(MODE_PRIVATE).edit().putBoolean("fine_location_requested", true).apply();
+        }
+        if (!permissions.isEmpty()) {
+            requestPermissions(permissions.toArray(new String[0]), 10);
             return;
         }
         begin();
@@ -144,9 +173,6 @@ public final class MainActivity extends Activity {
             status.setText(useMovilink ? "moviLinkの共有先が見つかりません。インストールと初期設定を確認してください。"
                     : "Googleマップが見つかりません。インストールと初期設定を確認してください。"); return;
         }
-        if (!resolver.available()) {
-            status.setText(R.string.geocoder_missing); return;
-        }
         getPreferences(MODE_PRIVATE).edit().putBoolean("bluetooth", bluetooth.isChecked())
                 .putBoolean("movilink", useMovilink).apply();
         active = true;
@@ -154,12 +180,15 @@ public final class MainActivity extends Activity {
         misses = 0;
         start.setText("会話を終了する");
         bluetooth.setEnabled(false); google.setEnabled(false); movilink.setEnabled(false);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         status.setText("音声を準備しています…");
         conversation = new Conversation(new Conversation.Host() {
+            @Override public void candidatesChanged(List<Destination> candidates) {
+                if (valid(session)) renderCandidates(session);
+            }
             @Override public void prompt(String message) {
                 if (!valid(session)) return;
-                status.setText("読み上げ中"); transcript.setText(message);
+                status.setText("読み上げ中");
+                transcript.setText(message);
                 speech.speak(message, () -> { if (valid(session)) { status.setText("聞き取りを開始しています…"); speech.listen(); } });
             }
             @Override public void search(String query, int request) {
@@ -167,36 +196,39 @@ public final class MainActivity extends Activity {
                 status.setText("目的地を検索中…"); transcript.setText(query);
                 searchTimeout = () -> { if (valid(session)) conversation.searchFailed(request); };
                 Runnable thisTimeout = searchTimeout;
-                handler.postDelayed(thisTimeout, 15000);
-                try {
-                    resolver.search(query, new DestinationResolver.Callback() {
-                        @Override public void success(java.util.List<Destination> results) {
-                            handler.post(() -> {
-                                if (!valid(session)) return;
-                                handler.removeCallbacks(thisTimeout);
-                                resolver.remember(query, results);
-                                conversation.found(request, results);
-                            });
-                        }
-                        @Override public void failure() {
-                            handler.post(() -> {
-                                if (!valid(session)) return;
-                                handler.removeCallbacks(thisTimeout);
-                                conversation.searchFailed(request);
-                            });
-                        }
-                    });
-                } catch (RuntimeException ex) {
-                    handler.removeCallbacks(thisTimeout);
-                    conversation.searchFailed(request);
-                }
+                handler.postDelayed(thisTimeout, 20000);
+                nearbyLocation.get(origin -> {
+                    if (!valid(session)) return;
+                    locationStatus.setText(origin == null ? R.string.nearby_unavailable : R.string.nearby_ready);
+                    try {
+                        resolver.search(query, origin, new DestinationResolver.Callback() {
+                            @Override public void success(List<Destination> results) {
+                                handler.post(() -> {
+                                    if (!valid(session)) return;
+                                    handler.removeCallbacks(thisTimeout);
+                                    conversation.found(request, results);
+                                });
+                            }
+                            @Override public void failure() {
+                                handler.post(() -> {
+                                    if (!valid(session)) return;
+                                    handler.removeCallbacks(thisTimeout);
+                                    conversation.searchFailed(request);
+                                });
+                            }
+                        });
+                    } catch (RuntimeException ex) {
+                        handler.removeCallbacks(thisTimeout);
+                        conversation.searchFailed(request);
+                    }
+                });
             }
             @Override public void navigate(Destination destination) {
                 if (!valid(session)) return;
                 String message = useMovilink ? "moviLinkへ施設を共有します。ルート操作は停車中に行ってください。"
                         : "Googleマップに目的地を渡します。";
-                String spokenMessage = useMovilink ? "モビリンクへ施設を共有します。ルート操作は停車中におこなってください。"
-                        : message;
+                String spokenMessage = conversation.isTapSelection() ? "この目的地で案内します。"
+                        : useMovilink ? "モビリンクへ施設を共有します。ルート操作は停車中におこなってください。" : message;
                 status.setText("目的地を確定しました"); transcript.setText(destination.spokenLabel());
                 speech.speak(spokenMessage, () -> {
                     if (!valid(session)) return;
@@ -243,28 +275,63 @@ public final class MainActivity extends Activity {
         });
         speech.initialize();
     }
+    private void renderCandidates(int session) {
+        candidateList.removeAllViews();
+        List<String> labels = conversation.candidateLabels();
+        candidateList.setVisibility(labels.isEmpty() ? View.GONE : View.VISIBLE);
+        for (int i = 0; i < labels.size(); i++) {
+            int index = i;
+            Button choice = new Button(this);
+            choice.setText(getString(R.string.candidate_button, i + 1, labels.get(i)));
+            choice.setAllCaps(false);
+            choice.setTextSize(18);
+            choice.setMinHeight(dp(80));
+            choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            choice.setOnClickListener(view -> {
+                if (valid(session) && conversation.state() == Conversation.State.CHOICE) {
+                    misses = 0;
+                    conversation.choose(index);
+                }
+            });
+            candidateList.addView(choice, new LinearLayout.LayoutParams(-1, -2));
+        }
+        if (!labels.isEmpty()) candidateList.post(() -> {
+            if (valid(session) && conversation.state() == Conversation.State.CHOICE) {
+                candidateList.requestRectangleOnScreen(new Rect(0, 0, candidateList.getWidth(), candidateList.getHeight()), true);
+            }
+        });
+    }
     private boolean valid(int session) { return active && foreground && session == generation; }
     private void end(String message) {
         active = false;
         ++generation;
         handler.removeCallbacksAndMessages(null);
+        nearbyLocation.close();
+        resolver.cancel();
         if (conversation != null) { conversation.stop(message); conversation = null; }
         if (speech != null) { speech.close(); speech = null; }
         if (router != null) { router.close(); router = null; }
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        candidateList.removeAllViews();
+        candidateList.setVisibility(View.GONE);
         start.setText("会話をはじめる");
         bluetooth.setEnabled(true); google.setEnabled(true); movilink.setEnabled(true);
         status.setText(message);
     }
-    @Override protected void onResume() { super.onResume(); foreground = true; }
+    @Override protected void onResume() {
+        super.onResume(); foreground = true;
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
     @Override protected void onStop() {
         foreground = false;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (active) end("画面を離れたため会話を終了しました。");
         super.onStop();
     }
     @Override protected void onDestroy() {
         foreground = false;
         if (active) end("会話を終了しました。");
+        nearbyLocation.close();
+        resolver.close();
         super.onDestroy();
     }
 }

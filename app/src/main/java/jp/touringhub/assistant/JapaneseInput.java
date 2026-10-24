@@ -15,7 +15,7 @@ public final class JapaneseInput {
         return List.of("キャンセル", "中止", "やめる", "終了", "やめて", "中止して", "終了して").contains(normalize(text));
     }
     public static boolean yes(String text) {
-        return List.of("はい", "はいお願いします", "うん", "そう", "そうです", "お願いします",
+        return List.of("はい", "はいお願いします", "うん", "そう", "そうです", "お願い", "お願いします",
                 "そこ", "そこです", "それでお願いします", "それでいいです", "合っています", "あっています",
                 "正しいです", "オーケー", "ok").contains(normalize(text));
     }
@@ -38,7 +38,7 @@ public final class JapaneseInput {
     }
     public static int choice(String text, int count) {
         String value = normalize(text).replaceFirst("^(?:候補の|候補)", "")
-                .replaceFirst("(?:番目|番|つ目|ばんめ|ばん)(?:の候補)?(?:で|です|をお願い(?:します)?|にして|でお願いします)?$", "");
+                .replaceFirst("(?:番目|番|つ目|ばんめ|ばん)(?:の候補)?(?:で(?:お願い(?:します)?)?|です|をお願い(?:します)?|にして(?:ください)?|がいい(?:です)?)?$", "");
         String[] kanji = {"一", "二", "三", "四", "五"};
         String[] reading = {"いち", "に", "さん", "よん", "ご"};
         for (int i = 0; i < Math.min(count, 5); i++) {

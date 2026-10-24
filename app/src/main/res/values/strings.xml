@@ -2,6 +2,10 @@
     <string name="bluetooth_mode">Bluetoothインカムを使う</string>
     <string name="google_mode">Google マップで案内</string>
     <string name="movilink_mode">moviLinkへ共有（停車中のみ）</string>
-    <string name="geocoder_missing">端末に地名検索サービスがありません。Googleのサービスと端末設定を確認してください。</string>
     <string name="heard">聞き取り：%1$s</string>
+    <string name="candidate_button">%1$d番、%2$s</string>
+    <string name="nearby_ready">現在地に近い候補を優先します。</string>
+    <string name="nearby_unavailable">現在地を取得できないため、検索結果の順で提示します。</string>
+    <string name="location_explanation">近い候補を優先するため位置情報を使用します。正確な位置を許可するとGPSも併用します。検索先には約2km単位に丸めた位置だけを送信します。未許可・取得不可でも検索できます。</string>
+    <string name="search_attribution">検索には端末のサービスとPhoton（公開デモ）を使用し、検索語と取得できたおおよその現在地を送信します。Photonは利用制限・停止の可能性があり、提供は保証されません。&lt;br&gt;地点データ：© &lt;a href="https://www.openstreetmap.org/copyright"&gt;OpenStreetMap contributors&lt;/a&gt;（ODbL）。&lt;a href="https://github.com/komoot/photon#demo-server"&gt;Photonの利用条件&lt;/a&gt;</string>
 </resources>

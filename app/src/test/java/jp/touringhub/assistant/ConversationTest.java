@@ -11,10 +11,12 @@ public class ConversationTest {
         String prompt, query, finish;
         int request, launches;
         Destination destination;
+        List<Destination> shown = List.of();
         @Override public void prompt(String message) { prompt = message; }
         @Override public void search(String text, int token) { query = text; request = token; }
         @Override public void navigate(Destination value) { launches++; destination = value; }
         @Override public void finish(String message) { finish = message; }
+        @Override public void candidatesChanged(List<Destination> values) { shown = values; }
     }
     @Test public void onlyExplicitConfirmationLaunchesOnce() {
         Fake host = new Fake(); Conversation c = new Conversation(host);
@@ -86,5 +88,59 @@ public class ConversationTest {
         c.start(); c.heard("道志"); c.found(host.request, List.of(DOSHI));
         String prompt = host.prompt; c.heard("もう一度言って");
         assertEquals(prompt, host.prompt); assertEquals(0, host.launches);
+    }
+    @Test public void voiceChoiceAndNaturalAffirmativeStillRequireTwoSteps() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.heard("2番でお願い");
+        assertEquals(Conversation.State.CONFIRM, c.state()); assertEquals(0, host.launches);
+        assertTrue(host.shown.isEmpty());
+        c.heard("お願い"); assertEquals(OTHER, host.destination);
+    }
+    @Test public void tappingChoiceConfirmsAndLaunchesExactlyOnceWithoutVoiceAnswer() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        assertFalse(c.choose(-1)); assertFalse(c.choose(2));
+        assertTrue(c.choose(0)); assertFalse(c.choose(1));
+        assertEquals(1, host.launches); assertTrue(host.shown.isEmpty());
+        assertTrue(c.isTapSelection()); assertEquals(DOSHI, host.destination);
+        assertEquals(Conversation.State.FINISHED, c.state());
+        c.heard("はい"); assertEquals(1, host.launches);
+    }
+    @Test public void screenAndVoicePresentSameThreeCandidates() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination third = new Destination("3件目", "東京都千代田区", 35, 139, "東京都千代田区");
+        Destination fourth = new Destination("4件目", "東京都港区", 35, 139, "東京都港区");
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER, third, fourth));
+        assertEquals(List.of(DOSHI, OTHER, third), host.shown);
+        List<String> labels = c.candidateLabels();
+        for (int i = 0; i < labels.size(); i++) assertTrue(host.prompt.contains((i + 1) + "番、" + labels.get(i)));
+        assertFalse(host.prompt.contains("4件目")); assertFalse(c.choose(3));
+        c.heard("1番じゃない"); assertEquals(Conversation.State.CHOICE, c.state());
+    }
+    @Test public void sameCityAndFacilityNameRetainDetailedAddressForDisambiguation() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination a = new Destination("同名施設", "東京都港区一丁目", 35, 139, "東京都港区");
+        Destination b = new Destination("同名施設", "東京都港区二丁目", 35.1, 139, "東京都港区");
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(a, b));
+        assertTrue(host.prompt.contains("一丁目")); assertTrue(host.prompt.contains("二丁目"));
+        c.heard("2番"); assertTrue(host.prompt.contains("二丁目"));
+        assertEquals(0, host.launches);
+    }
+    @Test public void cancellingOrRejectingCandidatesClearsButtonsAndRejectsStaleTap() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.heard("違う"); assertTrue(host.shown.isEmpty()); assertFalse(c.choose(0));
+        c.heard("もう一度検索"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.heard("キャンセル"); assertTrue(host.shown.isEmpty()); assertFalse(c.choose(1));
+        assertEquals(0, host.launches);
+    }
+    @Test public void naturalNumberChoicesAreStrictAboutNegationAndMultipleNumbers() {
+        for (String value : List.of("2番でお願い", "二番目でお願いします", "2番がいいです", "2番をお願い", "2ばんにしてください")) {
+            assertEquals(value, 1, JapaneseInput.choice(value, 3));
+        }
+        for (String value : List.of("2番じゃない", "2番か3番", "2番ではなく1番", "4番でお願い")) {
+            assertEquals(value, -1, JapaneseInput.choice(value, 3));
+        }
     }
 }

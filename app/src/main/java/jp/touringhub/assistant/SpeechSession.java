@@ -82,8 +82,11 @@ public final class SpeechSession implements AutoCloseable {
         if (speechTimeout != null) handler.removeCallbacks(speechTimeout);
         Runnable next = afterSpeech;
         afterSpeech = null;
+        int completedTurn = utterance;
         // A short acoustic tail prevents the prompt itself being recognized as the answer.
-        handler.postDelayed(() -> { if (!closed && next != null) next.run(); }, 350);
+        handler.postDelayed(() -> {
+            if (!closed && completedTurn == utterance && next != null) next.run();
+        }, 350);
     }
     public void listen() {
         if (closed) return;

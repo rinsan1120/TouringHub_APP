@@ -18,6 +18,9 @@ public record Destination(String name, String address, double latitude, double l
     public String coordinates() {
         return Double.toString(latitude) + "," + Double.toString(longitude);
     }
+    public String candidateLabel() {
+        return area.isBlank() ? spokenLabel() : area + "、" + name;
+    }
     public String confirmationLabel() {
         if (!area.isBlank()) {
             if (name.contains(area)) return name;
