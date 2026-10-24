@@ -31,7 +31,7 @@ public final class DestinationResolver implements AutoCloseable {
         String key = query + (origin == null ? "|global" : String.format(Locale.ROOT, "|%.2f,%.2f", origin.latitude(), origin.longitude()));
         Cached cached = cache.get(key);
         if (cached != null && SystemClock.elapsedRealtime() - cached.savedAt() < 600000) {
-            callback.success(CandidateRanking.select(cached.results(), origin)); return;
+            callback.success(CandidateRanking.select(cached.results(), origin, query)); return;
         }
         int request = generation;
         List<Destination> collected = new ArrayList<>();
@@ -45,7 +45,7 @@ public final class DestinationResolver implements AutoCloseable {
             if (succeeded[0]) {
                 if (cache.size() >= 30) cache.remove(cache.keySet().iterator().next());
                 if (!collected.isEmpty()) cache.put(key, new Cached(List.copyOf(collected), SystemClock.elapsedRealtime()));
-                callback.success(CandidateRanking.select(collected, origin));
+                callback.success(CandidateRanking.select(collected, origin, query));
             } else callback.failure();
         };
         timeout = finish;
@@ -65,7 +65,6 @@ public final class DestinationResolver implements AutoCloseable {
                 for (Address address : addresses) {
                     if (!address.hasLatitude() || !address.hasLongitude()) continue;
                     String name = address.getFeatureName();
-                    if (name == null || name.isBlank() || name.matches("[0-9０-９\\-ー丁目番地号]+")) name = query;
                     String line = address.getMaxAddressLineIndex() >= 0 ? address.getAddressLine(0) : "";
                     if (line == null || line.isBlank()) {
                         StringBuilder fallback = new StringBuilder();
@@ -76,6 +75,9 @@ public final class DestinationResolver implements AutoCloseable {
                     }
                     // Never confirm a location with no address to distinguish similarly named facilities.
                     if (line.isBlank()) continue;
+                    // A missing provider name must not become a fabricated exact
+                    // match merely because the user requested that facility.
+                    if (name == null || name.isBlank() || name.matches("[0-9０-９\\-ー丁目番地号]+")) name = line;
                     String area = Destination.area(address.getAdminArea(), address.getLocality(), address.getSubLocality());
                     Destination destination = new Destination(name, line, address.getLatitude(), address.getLongitude(), area);
                     if (!results.contains(destination)) results.add(destination);

@@ -30,6 +30,9 @@ final class CandidateRanking {
     }
     private CandidateRanking() {}
     static List<Destination> select(List<Destination> results, Origin origin) {
+        return select(results, origin, "");
+    }
+    static List<Destination> select(List<Destination> results, Origin origin, String query) {
         Map<String, Destination> unique = new LinkedHashMap<>();
         for (Destination destination : results) {
             String key = JapaneseInput.normalize(destination.name()) + "|"
@@ -38,21 +41,51 @@ final class CandidateRanking {
         }
         List<Destination> ranked = new ArrayList<>(unique.values());
         if (origin != null) ranked.sort(Comparator.comparingDouble(origin::distanceTo));
+        String requestedName = JapaneseInput.normalize(query);
         List<Destination> selected = new ArrayList<>();
         for (Destination candidate : ranked) {
-            boolean nearby = false;
-            // Compare against every accepted candidate, never against rejected results.
-            for (Destination accepted : selected) {
-                if (new Origin(accepted.latitude(), accepted.longitude()).distanceTo(candidate)
-                        < MIN_SEPARATION_METERS) {
-                    nearby = true;
-                    break;
+            if (isNearbyAny(candidate, selected)) continue;
+            Destination representative = candidate;
+            double bestMatch = nameSimilarity(requestedName, candidate.name());
+            // Keep the existing geographic/provider order between distinct places.
+            // Only promote a better name within this candidate's direct 1 km radius.
+            for (Destination neighbor : ranked) {
+                if (!isNearby(candidate, neighbor) || isNearbyAny(neighbor, selected)) continue;
+                double match = nameSimilarity(requestedName, neighbor.name());
+                if (match > bestMatch) {
+                    representative = neighbor;
+                    bestMatch = match;
                 }
             }
-            if (nearby) continue;
-            selected.add(candidate);
+            selected.add(representative);
             if (selected.size() == Conversation.MAX_CANDIDATES) break;
         }
         return List.copyOf(selected);
+    }
+    private static boolean isNearby(Destination first, Destination second) {
+        return new Origin(first.latitude(), first.longitude()).distanceTo(second) < MIN_SEPARATION_METERS;
+    }
+    private static boolean isNearbyAny(Destination candidate, List<Destination> accepted) {
+        for (Destination destination : accepted) if (isNearby(destination, candidate)) return true;
+        return false;
+    }
+    private static double nameSimilarity(String requested, String name) {
+        String normalized = JapaneseInput.normalize(name);
+        if (requested.isEmpty() || normalized.isEmpty()) return 0;
+        if (requested.equals(normalized)) return 1;
+        // Normalized edit similarity: appended shop names lose to the requested
+        // facility itself. Ties retain the pre-existing geographic/provider order.
+        int[] previous = new int[normalized.length() + 1];
+        for (int j = 0; j < previous.length; j++) previous[j] = j;
+        for (int i = 1; i <= requested.length(); i++) {
+            int[] current = new int[normalized.length() + 1];
+            current[0] = i;
+            for (int j = 1; j <= normalized.length(); j++) {
+                current[j] = Math.min(Math.min(previous[j] + 1, current[j - 1] + 1),
+                        previous[j - 1] + (requested.charAt(i - 1) == normalized.charAt(j - 1) ? 0 : 1));
+            }
+            previous = current;
+        }
+        return 1.0 - (double) previous[normalized.length()] / Math.max(requested.length(), normalized.length());
     }
 }

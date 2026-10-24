@@ -48,6 +48,25 @@ public class ConversationTest {
         assertTrue(host.prompt.contains("道の駅どうし")); assertEquals(0, host.launches);
         c.heard("はい"); assertEquals(DOSHI, host.destination); assertEquals(1, host.launches);
     }
+    @Test public void representativeSelectionConfirmsTheActualFacilityRatherThanItsShop() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination shop = new Destination("道の駅どうし 売店", "山梨県道志村", 35.5001, 139.0);
+        c.start(); c.heard("道の駅どうしに行きたい");
+        c.found(host.request, CandidateRanking.select(List.of(shop, DOSHI), null, host.query));
+        assertEquals(Conversation.State.CONFIRM, c.state());
+        assertFalse(host.prompt.contains("売店")); assertEquals(0, host.launches);
+        c.heard("はい"); assertSame(DOSHI, host.destination); assertEquals(1, host.launches);
+    }
+    @Test public void missingMainFacilityConfirmsReturnedShopNameWithoutInventingMainFacility() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination shop = new Destination("道の駅どうし 売店", "山梨県道志村", 35.5001, 139.0);
+        c.start(); c.heard("道の駅どうしに行きたい");
+        c.found(host.request, CandidateRanking.select(List.of(shop), null, host.query));
+        assertEquals(Conversation.State.CONFIRM, c.state());
+        assertTrue(host.prompt.contains("売店")); assertEquals(0, host.launches);
+        c.heard("違う"); assertEquals(Conversation.State.DESTINATION, c.state());
+        assertEquals(0, host.launches);
+    }
     @Test public void rejectedDestinationCannotBeLaunched() {
         Fake host = new Fake(); Conversation c = new Conversation(host);
         c.start(); c.heard("どうし"); c.found(host.request, List.of(DOSHI));

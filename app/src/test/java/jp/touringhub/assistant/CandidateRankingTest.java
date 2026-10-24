@@ -109,4 +109,58 @@ public class CandidateRankingTest {
         assertEquals(new CandidateRanking.Origin(90, 180), new CandidateRanking.Origin(89.99999, 179.99999).approximate());
         assertEquals(new CandidateRanking.Origin(-90, -180), new CandidateRanking.Origin(-89.99999, -179.99999).approximate());
     }
+    @Test public void exactFacilityNameReplacesEarlierNearbyShopsAndStillFillsThreeSlots() {
+        Destination kitchen = metersEast("道の駅どうし てづくりキッチン", 0);
+        Destination shop = metersEast("道の駅どうし 売店", 100);
+        Destination other = metersEast("別地点", 3000), third = metersEast("さらに別地点", 6000);
+        Destination main = metersEast("道の駅どうし", 200);
+        assertEquals(List.of(main, other, third), CandidateRanking.select(
+                List.of(kitchen, shop, other, third, main), new CandidateRanking.Origin(0, 0), "道の駅どうし"));
+    }
+    @Test public void exactNameUsesExistingWidthWhitespaceAndCaseNormalization() {
+        Destination shop = metersEast("ABC公園 売店", 0), main = metersEast("ＡＢＣ 公園", 100);
+        assertEquals(List.of(main), CandidateRanking.select(List.of(shop, main), null, "abc公園"));
+    }
+    @Test public void closerNameWinsWithoutExactMatchAndRetainsActualProviderData() {
+        Destination kitchen = metersEast("道の駅どうし てづくりキッチン", 0);
+        Destination shop = metersEast("道の駅どうし 売店", 100);
+        List<Destination> selected = CandidateRanking.select(List.of(kitchen, shop), null, "道の駅どうし");
+        assertEquals(List.of(shop), selected);
+        assertSame(shop, selected.get(0));
+        assertEquals("道の駅どうし 売店", selected.get(0).name());
+    }
+    @Test public void equallySimilarNamesKeepExistingProviderAndDistancePriority() {
+        Destination first = metersEast("公園A", 0), second = metersEast("公園B", 100);
+        assertEquals(List.of(first), CandidateRanking.select(List.of(first, second), null, "公園"));
+        assertEquals(List.of(second), CandidateRanking.select(
+                List.of(first, second), new CandidateRanking.Origin(0, second.longitude()), "公園"));
+    }
+    @Test public void distantExactMatchDoesNotReorderDistinctPlaces() {
+        Destination near = metersEast("公園 売店", 0), far = metersEast("公園", 3000);
+        assertEquals(List.of(near, far), CandidateRanking.select(List.of(near, far), null, "公園"));
+    }
+    @Test public void representativeMovementCannotViolateSeparationOrPreventLaterRefill() {
+        Destination first = metersEast("公園", 0), seed = metersEast("公園 売店", 1600);
+        Destination conflicting = metersEast("公園", 800), second = metersEast("公園 別館", 2200);
+        Destination third = metersEast("別地点", 4000);
+        List<Destination> selected = CandidateRanking.select(
+                List.of(first, seed, conflicting, second, third), null, "公園");
+        assertEquals(List.of(first, seed, third), selected);
+        for (int i = 0; i < selected.size(); i++) {
+            for (int j = i + 1; j < selected.size(); j++) {
+                Destination point = selected.get(i);
+                assertTrue(new CandidateRanking.Origin(point.latitude(), point.longitude()).distanceTo(selected.get(j)) >= 1000);
+            }
+        }
+    }
+    @Test public void nearbyChainsDoNotMergeDistantPlacesTransitively() {
+        Destination first = metersEast("公園", 0), middle = metersEast("公園 売店", 750);
+        Destination last = metersEast("公園", 1500);
+        assertEquals(List.of(first, last), CandidateRanking.select(List.of(first, middle, last), null, "公園"));
+    }
+    @Test public void rejectedSeedDoesNotSuppressAPlaceFarEnoughFromChosenRepresentative() {
+        Destination seed = metersEast("公園 売店", 0), main = metersEast("公園", 900);
+        Destination other = metersEast("別地点", -900);
+        assertEquals(List.of(main, other), CandidateRanking.select(List.of(seed, main, other), null, "公園"));
+    }
 }
