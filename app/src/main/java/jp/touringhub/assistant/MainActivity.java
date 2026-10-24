@@ -479,7 +479,7 @@ public final class MainActivity extends Activity {
         candidateList.setVisibility(confirming || choosing ? View.VISIBLE : View.GONE);
         if (confirming) {
             candidateList.addView(heading("この目的地でよろしいですか", 20));
-            candidateList.addView(heading(selected.name(), 24));
+            candidateList.addView(heading(selected.displayName(), 24));
             candidateList.addView(text(selected.address().isBlank() ? "所在地情報なし" : selected.address(), 18, WHITE));
             if (conversation.isTapSelection()) {
                 candidateList.addView(text("確認してから案内を開始します。", 15, MUTED));
@@ -509,7 +509,7 @@ public final class MainActivity extends Activity {
                 int index = i;
                 Destination destination = candidates.get(i);
                 Button choice = action(getString(R.string.candidate_button, i + 1,
-                        destination.name() + "\n" + (destination.address().isBlank() ? "所在地情報なし" : destination.address())),
+                        destination.displayName() + "\n" + (destination.address().isBlank() ? "所在地情報なし" : destination.address())),
                         SURFACE, WHITE, 96);
                 choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 choice.setTextSize(18);

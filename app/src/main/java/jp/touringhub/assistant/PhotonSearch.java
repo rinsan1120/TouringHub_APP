@@ -84,13 +84,25 @@ final class PhotonSearch implements AutoCloseable {
             JSONArray point = geometry.optJSONArray("coordinates");
             if (point == null || point.length() < 2 || !"Point".equals(value(geometry, "type"))) continue;
             String name = value(properties, "name"), state = value(properties, "state"), city = value(properties, "city");
-            // Never invent a facility name or a locality missing from the source.
-            if (name.isBlank() || state.isBlank() || city.isBlank() || name.length() > 160) continue;
+            if (name.length() > 160) continue;
             String district = value(properties, "district");
-            String area = Destination.area(state, city, district);
-            String address = state + city + district + value(properties, "street") + value(properties, "housenumber");
-            if (address.length() > 500) continue;
-            try { results.add(new Destination(name, address, point.optDouble(1, Double.NaN), point.optDouble(0, Double.NaN), area)); }
+            String county = value(properties, "county"), street = value(properties, "street");
+            String house = value(properties, "housenumber");
+            String locality = city.isBlank() ? county : city;
+            String area = Destination.area(state, locality, district);
+            String address = state + locality + district + street + house;
+            // Missing city is not missing address: some POIs supply county/district
+            // instead. Retain only the address fields actually returned with this point.
+            if (address.isBlank() || address.length() > 500) continue;
+            String facility = ProviderNames.facilityName(name, address, state, city, county, district, street, house);
+            String key = value(properties, "osm_key");
+            if (key.equals("place") || key.equals("boundary")
+                    || (key.equals("highway") && !value(properties, "osm_value").equals("bus_stop"))) facility = "";
+            try {
+                double lat = point.optDouble(1, Double.NaN), lon = point.optDouble(0, Double.NaN);
+                results.add(facility.isEmpty() ? Destination.addressCandidate(address, lat, lon, area)
+                        : new Destination(facility, address, lat, lon, area));
+            }
             catch (IllegalArgumentException ignored) { /* Invalid source coordinates are unusable. */ }
         }
         return List.copyOf(results);

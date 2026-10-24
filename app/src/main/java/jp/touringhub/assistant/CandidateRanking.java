@@ -35,7 +35,7 @@ final class CandidateRanking {
     static List<Destination> select(List<Destination> results, Origin origin, String query) {
         Map<String, Destination> unique = new LinkedHashMap<>();
         for (Destination destination : results) {
-            String key = JapaneseInput.normalize(destination.name()) + "|"
+            String key = destination.hasFacilityName() + "|" + JapaneseInput.normalize(destination.name()) + "|"
                     + String.format(Locale.ROOT, "%.5f,%.5f", destination.latitude(), destination.longitude());
             unique.putIfAbsent(key, destination);
         }
@@ -46,13 +46,15 @@ final class CandidateRanking {
         for (Destination candidate : ranked) {
             if (isNearbyAny(candidate, selected)) continue;
             Destination representative = candidate;
-            double bestMatch = nameSimilarity(requestedName, candidate.name());
+            double bestMatch = match(requestedName, candidate);
             // Keep the existing geographic/provider order between distinct places.
             // Only promote a better name within this candidate's direct 1 km radius.
             for (Destination neighbor : ranked) {
                 if (!isNearby(candidate, neighbor) || isNearbyAny(neighbor, selected)) continue;
-                double match = nameSimilarity(requestedName, neighbor.name());
-                if (match > bestMatch) {
+                double match = match(requestedName, neighbor);
+                // An unnamed address must not be replaced by an unrelated nearby
+                // business merely because all nonempty names have some edit similarity.
+                if (match > bestMatch && (representative.hasFacilityName() || match >= 0.6)) {
                     representative = neighbor;
                     bestMatch = match;
                 }
@@ -61,6 +63,9 @@ final class CandidateRanking {
             if (selected.size() == Conversation.MAX_CANDIDATES) break;
         }
         return List.copyOf(selected);
+    }
+    private static double match(String requested, Destination destination) {
+        return destination.hasFacilityName() ? nameSimilarity(requested, destination.name()) : 0;
     }
     private static boolean isNearby(Destination first, Destination second) {
         return new Origin(first.latitude(), first.longitude()).distanceTo(second) < MIN_SEPARATION_METERS;

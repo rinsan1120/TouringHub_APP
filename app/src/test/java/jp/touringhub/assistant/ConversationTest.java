@@ -5,6 +5,45 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class ConversationTest {
+    @Test public void recoveredProviderNameKeepsItsOwnAddressAndPointThroughSelectionAndLaunch() {
+        Destination address = Destination.addressCandidate("東京都大田区東糀谷1-2-3", 35.55, 139.74, "東京都大田区");
+        Destination named = ProviderNames.geocoded("1-2-4", "モトラッド羽田", "東京都大田区東糀谷1-2-4",
+                35.5501, 139.7401, "東京都大田区", "東京都", "大田区", "東糀谷", "1-2-4");
+        for (boolean tap : new boolean[]{false, true}) {
+            Fake host = new Fake(); Conversation c = new Conversation(host);
+            c.start(); c.heard("モトラッド羽田");
+            c.found(host.request, CandidateRanking.select(List.of(address, named, OTHER), null, host.query));
+            assertSame(named, c.candidates().get(0));
+            assertTrue(host.prompt.contains("モトラッド羽田"));
+            if (tap) c.choose(0); else c.heard("1番");
+            assertSame(named, c.selected()); assertEquals(0, host.launches);
+            c.heard("はい"); assertSame(named, host.destination);
+            assertEquals("東京都大田区東糀谷1-2-4", host.destination.address());
+            assertEquals("35.5501,139.7401", host.destination.coordinates());
+        }
+    }
+    @Test public void unconfirmedAddressRemainsUnconfirmedThroughVoiceAndTapConfirmation() {
+        Destination address = Destination.addressCandidate("東京都大田区東糀谷1-2-3", 35.55, 139.74, "東京都大田区");
+        for (boolean tap : new boolean[]{false, true}) {
+            Fake host = new Fake(); Conversation c = new Conversation(host);
+            c.start(); c.heard("モトラッド羽田"); c.found(host.request, List.of(address, OTHER));
+            assertTrue(host.prompt.contains("施設名未確認")); assertTrue(host.prompt.contains(address.address()));
+            if (tap) c.choose(0); else c.heard("1番");
+            assertSame(address, c.selected()); assertEquals(0, host.launches);
+            assertTrue(host.prompt.contains("施設名未確認")); assertTrue(host.prompt.contains(address.address()));
+            assertFalse(host.prompt.contains("モトラッド羽田"));
+            c.heard("はい"); assertSame(address, host.destination);
+            assertFalse(host.destination.hasFacilityName()); assertEquals("35.55,139.74", host.destination.coordinates());
+        }
+    }
+    @Test public void singleUnconfirmedAddressNeedsExplicitConfirmation() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination address = Destination.addressCandidate("東京都大田区東糀谷", 35.55, 139.74, "東京都大田区");
+        c.start(); c.heard("モトラッド羽田"); c.found(host.request, List.of(address));
+        assertEquals(Conversation.State.CONFIRM, c.state()); assertEquals(0, host.launches);
+        assertTrue(host.prompt.contains("施設名未確認"));
+        c.heard("はい"); assertSame(address, host.destination);
+    }
     private static final Destination DOSHI = new Destination("道の駅どうし", "山梨県南都留郡道志村", 35.5, 139.0, "山梨県道志村");
     private static final Destination OTHER = new Destination("同名施設", "静岡県御殿場市", 35.3, 138.9);
     private static final class Fake implements Conversation.Host {

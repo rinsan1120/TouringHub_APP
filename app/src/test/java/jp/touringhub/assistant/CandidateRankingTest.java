@@ -6,6 +6,19 @@ import java.util.Locale;
 import static org.junit.Assert.*;
 
 public class CandidateRankingTest {
+    @Test public void matchingNamedResultReplacesAddressWithoutMixingTheirDataInEitherOrder() {
+        Destination address = Destination.addressCandidate("東京都大田区東糀谷1-2-3", 35, 139, "東京都大田区");
+        Destination facility = new Destination("モトラッド羽田", "東京都大田区東糀谷4-5-6", 35.0001, 139.0001, "東京都大田区");
+        for (List<Destination> results : List.of(List.of(address, facility), List.of(facility, address))) {
+            assertSame(facility, CandidateRanking.select(results, new CandidateRanking.Origin(35, 139), "モトラッド羽田").get(0));
+        }
+    }
+    @Test public void unrelatedNearbyBusinessCannotLabelAnUnconfirmedAddress() {
+        Destination address = Destination.addressCandidate("東京都大田区東糀谷", 35, 139, "東京都大田区");
+        Destination shop = new Destination("コンビニ", "東京都大田区別番地", 35.0001, 139);
+        assertEquals(List.of(address), CandidateRanking.select(List.of(address, shop), null, "モトラッド羽田"));
+        assertEquals(List.of(address), CandidateRanking.select(List.of(address), null, "モトラッド羽田"));
+    }
     private Destination at(String name, double latitude) {
         return new Destination(name, "テスト用住所", latitude, 139);
     }

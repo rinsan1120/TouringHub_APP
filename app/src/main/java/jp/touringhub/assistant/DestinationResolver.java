@@ -64,7 +64,6 @@ public final class DestinationResolver implements AutoCloseable {
                 List<Destination> results = new ArrayList<>();
                 for (Address address : addresses) {
                     if (!address.hasLatitude() || !address.hasLongitude()) continue;
-                    String name = address.getFeatureName();
                     String line = address.getMaxAddressLineIndex() >= 0 ? address.getAddressLine(0) : "";
                     if (line == null || line.isBlank()) {
                         StringBuilder fallback = new StringBuilder();
@@ -75,11 +74,15 @@ public final class DestinationResolver implements AutoCloseable {
                     }
                     // Never confirm a location with no address to distinguish similarly named facilities.
                     if (line.isBlank()) continue;
-                    // A missing provider name must not become a fabricated exact
-                    // match merely because the user requested that facility.
-                    if (name == null || name.isBlank() || name.matches("[0-9０-９\\-ー丁目番地号]+")) name = line;
                     String area = Destination.area(address.getAdminArea(), address.getLocality(), address.getSubLocality());
-                    Destination destination = new Destination(name, line, address.getLatitude(), address.getLongitude(), area);
+                    Destination destination;
+                    try {
+                        destination = ProviderNames.geocoded(address.getFeatureName(), address.getPremises(), line,
+                                address.getLatitude(), address.getLongitude(), area, address.getCountryName(),
+                                address.getAdminArea(), address.getSubAdminArea(), address.getLocality(),
+                                address.getSubLocality(), address.getThoroughfare(), address.getSubThoroughfare(),
+                                address.getPostalCode());
+                    } catch (IllegalArgumentException ignored) { continue; }
                     if (!results.contains(destination)) results.add(destination);
                 }
                 handler.post(() -> {

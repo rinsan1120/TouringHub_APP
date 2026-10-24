@@ -1,6 +1,10 @@
 package jp.touringhub.assistant;
 
-public record Destination(String name, String address, double latitude, double longitude, String area) {
+public record Destination(String name, String address, double latitude, double longitude, String area,
+                          boolean hasFacilityName) {
+    public Destination(String name, String address, double latitude, double longitude, String area) {
+        this(name, address, latitude, longitude, area, true);
+    }
     public Destination(String name, String address, double latitude, double longitude) {
         this(name, address, latitude, longitude, "");
     }
@@ -13,15 +17,24 @@ public record Destination(String name, String address, double latitude, double l
         area = area == null ? "" : area.trim();
     }
     public String spokenLabel() {
+        if (!hasFacilityName) return displayName() + "、" + address;
         return address.isBlank() || address.equals(name) ? name : name + "、" + address;
+    }
+    public String displayName() {
+        return hasFacilityName ? name : "住所候補（施設名未確認）";
+    }
+    static Destination addressCandidate(String address, double latitude, double longitude, String area) {
+        return new Destination(address, address, latitude, longitude, area, false);
     }
     public String coordinates() {
         return Double.toString(latitude) + "," + Double.toString(longitude);
     }
     public String candidateLabel() {
+        if (!hasFacilityName) return spokenLabel();
         return area.isBlank() ? spokenLabel() : area + "、" + name;
     }
     public String confirmationLabel() {
+        if (!hasFacilityName) return spokenLabel();
         if (!area.isBlank()) {
             if (name.contains(area)) return name;
             if (area.endsWith(name)) return area;
