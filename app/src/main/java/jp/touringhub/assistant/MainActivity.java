@@ -215,11 +215,11 @@ public final class MainActivity extends Activity {
         handler.postDelayed(sessionTimeout, 180000);
         initTimeout = () -> { if (valid(session)) end("音声の準備が時間内に完了しませんでした。音声合成設定を確認してください。"); };
         handler.postDelayed(initTimeout, 20000);
-        speech = new SpeechSession(this, handler, new SpeechSession.Events() {
+        router = new AudioRouter(MainActivity.this, handler);
+        speech = new SpeechSession(this, handler, router, new SpeechSession.Events() {
             @Override public void ready() {
                 if (!valid(session)) return;
                 handler.removeCallbacks(initTimeout);
-                router = new AudioRouter(MainActivity.this, handler);
                 try {
                     router.open(bluetooth.isChecked(), () -> { if (valid(session)) conversation.start(); },
                             message -> { if (valid(session)) end(message); });

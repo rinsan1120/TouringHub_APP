@@ -10,13 +10,17 @@ import java.util.function.Consumer;
 
 /** Owns communication routing only for the duration of a foreground conversation. */
 public final class AudioRouter implements AutoCloseable {
-    public static final AudioAttributes VOICE = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    public static AudioAttributes voiceAttributes() {
+        return new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    }
     private final AudioManager manager;
     private final Handler handler;
     private AudioFocusRequest focus;
+    private AudioFocusLease focusLease;
     private AudioManager.OnCommunicationDeviceChangedListener listener;
+    private AudioManager.OnModeChangedListener modeListener;
+    private Consumer<String> failure;
     private int oldMode;
     private int targetId = -1;
     private boolean owned;
@@ -41,13 +45,31 @@ public final class AudioRouter implements AutoCloseable {
         }
         oldMode = manager.getMode();
         owned = true;
-        focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                .setAudioAttributes(VOICE).setOnAudioFocusChangeListener(change -> {
-                    if (owned && change < 0) onFailure.accept("ほかの通話や音声が優先されたため、会話を終了しました。");
-                }, handler).build();
-        if (manager.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            onFailure.accept("音声を使用できません。ほかの音声アプリを確認してください。"); return;
-        }
+        failure = onFailure;
+        focusLease = new AudioFocusLease(new AudioFocusLease.Backend() {
+            @Override public boolean request(Runnable onLoss) {
+                focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                        .setAudioAttributes(voiceAttributes()).setOnAudioFocusChangeListener(change -> {
+                            if (change < 0) onLoss.run();
+                        }, handler).build();
+                return manager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            }
+            @Override public void abandon() {
+                AudioFocusRequest previous = focus;
+                focus = null;
+                if (previous != null) manager.abandonAudioFocusRequest(previous);
+            }
+        }, () -> {
+            if (owned) onFailure.accept("ほかの通話や音声が優先されたため、会話を終了しました。");
+        });
+        // We yield focus to the recognition service during capture. Calls must still stop
+        // the conversation in that interval, without mistaking recognition's focus for a call.
+        modeListener = mode -> {
+            if (owned && isTelephoneMode(mode)) {
+                onFailure.accept("電話の着信や通話のため、会話を終了しました。");
+            }
+        };
+        manager.addOnModeChangedListener(handler::post, modeListener);
         targetId = target.getId();
         listener = device -> {
             if (!owned) return;
@@ -72,13 +94,44 @@ public final class AudioRouter implements AutoCloseable {
         handler.postDelayed(timeout, 6000);
         listener.onCommunicationDeviceChanged(manager.getCommunicationDevice());
     }
+    static boolean isTelephoneMode(int mode) {
+        return mode == AudioManager.MODE_RINGTONE || mode == AudioManager.MODE_IN_CALL
+                || mode == AudioManager.MODE_CALL_SCREENING || mode == AudioManager.MODE_CALL_REDIRECT
+                || mode == AudioManager.MODE_COMMUNICATION_REDIRECT;
+    }
+    private boolean canUseAudio() {
+        if (!owned) return false;
+        if (isTelephoneMode(manager.getMode())) {
+            failure.accept("電話の着信や通話のため、会話を終了しました。");
+            return false;
+        }
+        return true;
+    }
+    public boolean prepareSpeech() {
+        if (!canUseAudio()) return false;
+        if (!focusLease.acquire()) {
+            if (owned) failure.accept("音声を使用できません。ほかの音声アプリを確認してください。");
+            return false;
+        }
+        return true;
+    }
+    public boolean prepareRecognition() {
+        if (!canUseAudio()) return false;
+        // The recognizer runs in another package and may acquire its own exclusive focus.
+        // Abandon ours before startListening; do not tear down the Bluetooth audio route.
+        focusLease.release();
+        return canUseAudio();
+    }
     @Override public void close() {
         if (timeout != null) handler.removeCallbacks(timeout);
         if (!owned) return;
         owned = false;
+        if (focusLease != null) focusLease.close();
+        if (modeListener != null) manager.removeOnModeChangedListener(modeListener);
         if (listener != null) manager.removeOnCommunicationDeviceChangedListener(listener);
         manager.clearCommunicationDevice();
-        if (manager.getMode() == AudioManager.MODE_IN_COMMUNICATION) manager.setMode(oldMode);
-        if (focus != null) manager.abandonAudioFocusRequest(focus);
+        // Remove our mode request even if Android has temporarily made it inactive.
+        // A real phone call's higher-priority mode remains owned by Telecom.
+        manager.setMode(oldMode);
     }
 }

@@ -24,6 +24,7 @@ public final class SpeechSession implements AutoCloseable {
     private final Handler handler;
     private final Context context;
     private final Events events;
+    private final AudioRouter router;
     private TextToSpeech tts;
     private SpeechRecognizer recognizer;
     private boolean closed;
@@ -32,10 +33,11 @@ public final class SpeechSession implements AutoCloseable {
     private Runnable speechTimeout;
     private Runnable listenTimeout;
     private boolean listening;
-    public SpeechSession(Context context, Handler handler, Events events) {
+    public SpeechSession(Context context, Handler handler, AudioRouter router, Events events) {
         this.context = context;
         this.handler = handler;
         this.events = events;
+        this.router = router;
     }
     public void initialize() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -50,7 +52,7 @@ public final class SpeechSession implements AutoCloseable {
             if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
                 events.fatal("日本語の読み上げデータがありません。端末の音声合成設定を確認してください。"); return;
             }
-            tts.setAudioAttributes(AudioRouter.VOICE);
+            tts.setAudioAttributes(AudioRouter.voiceAttributes());
             tts.setSpeechRate(1.0f);
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String id) {}
@@ -65,6 +67,7 @@ public final class SpeechSession implements AutoCloseable {
     public void speak(String text, Runnable next) {
         if (closed) return;
         destroyRecognizer();
+        if (!router.prepareSpeech() || closed) return;
         if (speechTimeout != null) handler.removeCallbacks(speechTimeout);
         afterSpeech = next;
         String id = Integer.toString(++utterance);
@@ -85,6 +88,7 @@ public final class SpeechSession implements AutoCloseable {
     public void listen() {
         if (closed) return;
         destroyRecognizer();
+        if (!router.prepareRecognition() || closed) return;
         recognizer = SpeechRecognizer.createSpeechRecognizer(context);
         SpeechRecognizer current = recognizer;
         recognizer.setRecognitionListener(new RecognitionListener() {
@@ -101,6 +105,9 @@ public final class SpeechSession implements AutoCloseable {
                 listening = false;
                 handler.removeCallbacks(listenTimeout);
                 ArrayList<String> texts = result.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                destroyRecognizer();
+                // Recognition has finished; protect search/confirmation and the next spoken turn.
+                if (!router.prepareSpeech() || closed) return;
                 // Only final, top-ranked recognition can confirm a destination.
                 if (texts == null || texts.isEmpty() || texts.get(0).isBlank()) events.missed();
                 else events.heard(texts.get(0));
