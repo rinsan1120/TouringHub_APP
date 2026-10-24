@@ -195,8 +195,10 @@ public final class MainActivity extends Activity {
                 if (!valid(session)) return;
                 String message = useMovilink ? "moviLinkへ施設を共有します。ルート操作は停車中に行ってください。"
                         : "Googleマップに目的地を渡します。";
+                String spokenMessage = useMovilink ? "モビリンクへ施設を共有します。ルート操作は停車中におこなってください。"
+                        : message;
                 status.setText("目的地を確定しました"); transcript.setText(destination.spokenLabel());
-                speech.speak(message, () -> {
+                speech.speak(spokenMessage, () -> {
                     if (!valid(session)) return;
                     boolean targetMovilink = useMovilink;
                     end(message);
