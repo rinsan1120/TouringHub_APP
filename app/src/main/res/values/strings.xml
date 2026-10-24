@@ -1,4 +1,8 @@
 <resources>
+    <string name="setting_card">%1$s  %2$s\n%3$s</string>
+    <string name="settings_summary">音声：%1$s\nナビ：%2$s</string>
+    <string name="session_result">■ 終了・お知らせ\n%1$s</string>
+    <string name="search_query">検索する目的地：%1$s</string>
     <string name="bluetooth_mode">Bluetoothインカムを使う</string>
     <string name="google_mode">Google マップで案内</string>
     <string name="movilink_mode">moviLinkへ共有（停車中のみ）</string>
@@ -13,7 +17,7 @@
     <string name="help_open">▾ %1$s</string>
     <string name="help_collapsed">閉じています</string>
     <string name="help_expanded">開いています</string>
-    <string name="help_usage">「会話をはじめる」を押し、目的地を話してください。\n例：「山梨県の道の駅どうしに行きたい」\n\n復唱された目的地が正しければ「はい」、言い直す場合は「違う」と答えてください。\n\n複数候補は最大3件を番号・所在地・施設名で案内します。「1番」「2番でお願い」などで選び、復唱後に確認してください。候補を画面でタップすると、「この目的地で案内します。」の後、そのままナビへ渡します。\n\n終了する場合は「キャンセル」と話すか、「会話を終了する」を押してください。</string>
+    <string name="help_usage">「会話をはじめる」を押し、目的地を話してください。\n例：「山梨県の道の駅どうしに行きたい」\n\n復唱された目的地が正しければ「はい」、言い直す場合は「違う」と答えてください。\n\n複数候補は最大3件を番号・所在地・施設名で案内します。「1番」「2番でお願い」などで選び、復唱後に確認してください。候補を画面でタップした場合は、名称・所在地を確認して「案内する」を押すか、「はい」と答えてください。「選び直す」で候補に戻れます。画面操作は停車中に行ってください。\n\n終了する場合は「キャンセル」と話すか、「会話を終了する」を押してください。</string>
     <string name="help_notices">検索候補は網羅的ではありません。復唱された施設名と住所を確認してください。\n\nGoogleマップ・moviLinkはインストールと初期設定が必要です。moviLinkは施設共有まで対応。共有後のルート操作は停車中に行ってください。\n\nロック・別アプリへの切替で会話を終了します。1回の会話は最大3分です。\n\n有料API・サブスクリプションなし。通信料は契約に従います。音声・検索語は端末のサービスに送信される場合があります。</string>
     <string name="search_service_notice">検索には端末のサービスとPhoton（公開デモ）を使用し、検索語と取得できたおおよその現在地を送信します。Photonは利用制限・停止の可能性があり、提供は保証されません。</string>
     <string name="search_attribution">地点データ：© &lt;a href="https://www.openstreetmap.org/copyright"&gt;OpenStreetMap contributors&lt;/a&gt;（ODbL）。&lt;a href="https://github.com/komoot/photon#demo-server"&gt;Photonの利用条件&lt;/a&gt;</string>

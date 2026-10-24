@@ -126,15 +126,62 @@ public class ConversationTest {
         assertTrue(host.shown.isEmpty());
         c.heard("お願い"); assertEquals(OTHER, host.destination);
     }
-    @Test public void tappingChoiceConfirmsAndLaunchesExactlyOnceWithoutVoiceAnswer() {
+    @Test public void tappingChoiceNeedsExplicitConfirmationAndLaunchesExactlyOnce() {
         Fake host = new Fake(); Conversation c = new Conversation(host);
         c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        assertFalse(c.confirmSelection()); assertFalse(c.reselect());
         assertFalse(c.choose(-1)); assertFalse(c.choose(2));
         assertTrue(c.choose(0)); assertFalse(c.choose(1));
-        assertEquals(1, host.launches); assertTrue(host.shown.isEmpty());
-        assertTrue(c.isTapSelection()); assertEquals(DOSHI, host.destination);
-        assertEquals(Conversation.State.FINISHED, c.state());
-        c.heard("はい"); assertEquals(1, host.launches);
+        assertEquals(0, host.launches); assertTrue(host.shown.isEmpty());
+        assertTrue(c.isTapSelection()); assertSame(DOSHI, c.selected());
+        assertEquals(Conversation.State.CONFIRM, c.state());
+        assertTrue(host.prompt.contains("はい、または、違う"));
+        assertTrue(c.confirmSelection()); assertFalse(c.confirmSelection());
+        assertFalse(c.reselect()); c.heard("はい");
+        assertEquals(1, host.launches); assertSame(DOSHI, host.destination);
+    }
+    @Test public void reselectRestoresOriginalCandidatesAndCanConfirmAnotherDestinationByVoice() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        List<Destination> original = List.of(DOSHI, OTHER);
+        c.start(); c.heard("候補を探す"); c.found(host.request, original);
+        c.choose(0); assertTrue(c.reselect());
+        assertNull(c.selected()); assertFalse(c.isTapSelection());
+        assertEquals(Conversation.State.CHOICE, c.state());
+        assertEquals(original, host.shown); assertFalse(c.confirmSelection());
+        assertEquals(0, host.launches);
+        c.heard("2番"); assertFalse(c.isTapSelection()); assertFalse(c.reselect());
+        assertSame(OTHER, c.selected()); c.heard("はい");
+        assertSame(OTHER, host.destination); assertEquals(1, host.launches);
+    }
+    @Test public void tapConfirmationAcceptsVoiceYesButRejectsAmbiguousAnswers() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.choose(1); c.heard("はいじゃない");
+        assertEquals(0, host.launches); assertEquals(Conversation.State.CONFIRM, c.state());
+        c.heard("はい"); assertEquals(1, host.launches); assertSame(OTHER, host.destination);
+    }
+    @Test public void tapRejectionAndSessionEndInvalidateScreenConfirmation() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.choose(0); c.heard("違う");
+        assertEquals(Conversation.State.DESTINATION, c.state());
+        assertNull(c.selected()); assertFalse(c.confirmSelection()); assertFalse(c.reselect());
+        c.heard("探し直す"); c.found(host.request, List.of(DOSHI, OTHER));
+        c.choose(1); c.stop("タイムアウト");
+        assertNull(c.selected()); assertFalse(c.confirmSelection()); assertFalse(c.reselect());
+        c.heard("はい"); assertEquals(0, host.launches);
+    }
+    @Test public void repeatedTapConfirmationKeepsDetailedAddressAndDoesNotNavigate() {
+        Fake host = new Fake(); Conversation c = new Conversation(host);
+        Destination a = new Destination("同名施設", "東京都港区一丁目", 35, 139, "東京都港区");
+        Destination b = new Destination("同名施設", "東京都港区二丁目", 35.1, 139, "東京都港区");
+        c.start(); c.heard("候補を探す"); c.found(host.request, List.of(a, b));
+        c.choose(1); String prompt = host.prompt;
+        assertTrue(prompt.contains("二丁目")); c.heard("もう一度言って");
+        assertEquals(prompt, host.prompt); assertSame(b, c.selected());
+        assertEquals(0, host.launches); assertTrue(c.reselect());
+        c.choose(0); assertTrue(host.prompt.contains("一丁目"));
+        c.confirmSelection(); assertSame(a, host.destination); assertEquals(1, host.launches);
     }
     @Test public void screenAndVoicePresentSameThreeCandidates() {
         Fake host = new Fake(); Conversation c = new Conversation(host);

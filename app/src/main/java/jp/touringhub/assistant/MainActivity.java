@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.Rect;
 import android.text.method.LinkMovementMethod;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -15,10 +14,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.ArrayList;
@@ -34,10 +30,23 @@ public final class MainActivity extends Activity {
     private TextView locationStatus;
     private LinearLayout candidateList;
     private Button start;
-    private CheckBox bluetooth;
-    private RadioGroup navigation;
-    private RadioButton google;
-    private RadioButton movilink;
+    private static final int BACKGROUND = Color.rgb(16, 28, 40);
+    private static final int SURFACE = Color.rgb(24, 42, 58);
+    private static final int STOP = Color.rgb(255, 184, 173);
+    private LinearLayout preparation;
+    private ScrollView preparationScroll;
+    private TextView settingsSummary;
+    private LinearLayout sessionScreen;
+    private TextView phaseTitle;
+    private TextView phaseHint;
+    private TextView phaseAudio;
+    private Button bluetoothOn;
+    private Button bluetoothOff;
+    private Button google;
+    private Button movilink;
+    private boolean useBluetooth;
+    private boolean selectedMovilink;
+    private ScrollView sessionScroll;
     private Conversation conversation;
     private SpeechSession speech;
     private AudioRouter router;
@@ -65,77 +74,225 @@ public final class MainActivity extends Activity {
         view.setPadding(0, dp(8), 0, dp(8));
         return view;
     }
+    private LinearLayout column() {
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.VERTICAL);
+        return view;
+    }
+    private GradientDrawable surface(int color, int border) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dp(20));
+        if (border != 0) shape.setStroke(dp(2), border);
+        return shape;
+    }
+    private Button action(String label, int color, int foregroundColor, int minimumHeight) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setAllCaps(false);
+        button.setTextSize(20);
+        button.setTextColor(foregroundColor);
+        button.setTypeface(null, Typeface.BOLD);
+        button.setMinHeight(dp(minimumHeight));
+        button.setMinimumHeight(dp(minimumHeight));
+        button.setPadding(dp(20), dp(18), dp(20), dp(18));
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(60, 255, 255, 255)),
+                surface(color, 0), null));
+        return button;
+    }
+    private void addSpaced(LinearLayout parent, View view) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.setMargins(0, dp(12), 0, 0);
+        parent.addView(view, params);
+    }
+    private TextView heading(String title, int size) {
+        TextView view = text(title, size, WHITE);
+        view.setTypeface(null, Typeface.BOLD);
+        view.setAccessibilityHeading(true);
+        return view;
+    }
     private void buildScreen() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.rgb(16, 28, 40));
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(24), dp(16), dp(24), dp(24));
-        scroll.addView(content);
-        content.setOnApplyWindowInsetsListener((view, insets) -> {
+        useBluetooth = getPreferences(MODE_PRIVATE).getBoolean("bluetooth", true);
+        selectedMovilink = getPreferences(MODE_PRIVATE).getBoolean("movilink", false);
+        LinearLayout root = column();
+        root.setBackgroundColor(BACKGROUND);
+        root.setPadding(dp(20), dp(12), dp(20), dp(16));
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
             android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars()
                     | android.view.WindowInsets.Type.displayCutout());
-            view.setPadding(dp(24) + bars.left, dp(16) + bars.top, dp(24) + bars.right, dp(24) + bars.bottom);
+            view.setPadding(dp(20) + bars.left, dp(12) + bars.top, dp(20) + bars.right, dp(16) + bars.bottom);
             return insets;
         });
-        TextView eyebrow = text("TOURING HUB  /  VOICE NAVI", 12, MINT);
-        eyebrow.setLetterSpacing(0.12f);
-        content.addView(eyebrow);
-        TextView title = text("次の目的地を、\n声で決めよう。", 30, WHITE);
-        title.setTypeface(null, Typeface.BOLD);
-        content.addView(title);
-        content.addView(text("停車中に準備して開始してください。\nアプリの表示中は画面が点灯し、会話の聞き取りは自動で続きます。", 15, MUTED));
+        TextView brand = text("TOURING HUB  /  VOICE NAVI", 12, MINT);
+        brand.setLetterSpacing(0.10f);
+        root.addView(brand);
 
-        bluetooth = new CheckBox(this);
-        bluetooth.setText(R.string.bluetooth_mode);
-        bluetooth.setTextColor(WHITE);
-        bluetooth.setMinHeight(dp(56));
-        bluetooth.setChecked(getPreferences(MODE_PRIVATE).getBoolean("bluetooth", true));
-        content.addView(bluetooth);
-        navigation = new RadioGroup(this);
-        google = new RadioButton(this); google.setId(View.generateViewId());
-        google.setText(R.string.google_mode); google.setTextColor(WHITE); google.setMinHeight(dp(52));
-        movilink = new RadioButton(this); movilink.setId(View.generateViewId());
-        movilink.setText(R.string.movilink_mode); movilink.setTextColor(WHITE); movilink.setMinHeight(dp(52));
-        navigation.addView(google); navigation.addView(movilink);
-        navigation.check(getPreferences(MODE_PRIVATE).getBoolean("movilink", false) ? movilink.getId() : google.getId());
-        content.addView(navigation);
+        // One Activity and one session owner. Switching these views has no lifecycle effects.
+        android.widget.FrameLayout pages = new android.widget.FrameLayout(this);
+        root.addView(pages, new LinearLayout.LayoutParams(-1, 0, 1));
+        preparationScroll = new ScrollView(this);
+        preparationScroll.setFillViewport(true);
+        preparation = column();
+        preparationScroll.addView(preparation);
+        pages.addView(preparationScroll, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        sessionScroll = new ScrollView(this);
+        sessionScroll.setFillViewport(true);
+        sessionScreen = column();
+        sessionScroll.addView(sessionScreen);
+        sessionScroll.setVisibility(View.GONE);
+        pages.addView(sessionScroll, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        // Pane metadata announces screen changes; hidden controls cannot receive accessibility focus.
+        preparationScroll.setAccessibilityPaneTitle("出発前の準備");
+        sessionScroll.setAccessibilityPaneTitle("音声で目的地を決める");
+        preparation.addView(heading("出発前の準備", 28));
+        preparation.addView(text("停車中に開始してください", 16, MUTED));
+        sessionScreen.addView(heading("音声で目的地を決める", 24));
 
-        start = new Button(this);
-        start.setText("会話をはじめる"); start.setTextSize(25); start.setAllCaps(false);
-        start.setTypeface(null, Typeface.BOLD); start.setTextColor(Color.rgb(16, 28, 40));
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(MINT); background.setCornerRadius(dp(28));
-        start.setBackground(background);
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, dp(152));
-        buttonParams.setMargins(0, dp(20), 0, dp(16));
-        content.addView(start, buttonParams);
-        start.setOnClickListener(view -> {
-            if (active) { end("会話を終了しました。"); return; }
-            requestStart();
+        status = text("", 17, WHITE);
+        status.setPadding(dp(16), dp(16), dp(16), dp(16));
+        status.setBackground(surface(SURFACE, MINT));
+        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        status.setVisibility(View.GONE);
+        preparation.addView(status);
+        settingsSummary = text("", 18, WHITE);
+        settingsSummary.setPadding(dp(16), dp(16), dp(16), dp(16));
+        settingsSummary.setBackground(surface(SURFACE, 0));
+        settingsSummary.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        addSpaced(preparation, settingsSummary);
+        Button editSettings = action("▸ 音声・ナビ設定を変更", SURFACE, MINT, 64);
+        editSettings.setTextSize(17);
+        editSettings.setStateDescription(getString(R.string.help_collapsed));
+        addSpaced(preparation, editSettings);
+        LinearLayout settings = column();
+        settings.setVisibility(View.GONE);
+        preparation.addView(settings);
+        editSettings.setOnClickListener(view -> {
+            if (active) return;
+            boolean expanded = settings.getVisibility() != View.VISIBLE;
+            settings.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            editSettings.setText(expanded ? "▾ 音声・ナビ設定を閉じる" : "▸ 音声・ナビ設定を変更");
+            editSettings.setStateDescription(getString(expanded ? R.string.help_expanded : R.string.help_collapsed));
         });
-        status = text("待機中", 20, MINT); status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        content.addView(status);
-        candidateList = new LinearLayout(this);
-        candidateList.setOrientation(LinearLayout.VERTICAL);
-        candidateList.setVisibility(View.GONE);
-        content.addView(candidateList);
-        locationStatus = text("", 13, MUTED);
-        locationStatus.setVisibility(View.GONE);
-        content.addView(locationStatus);
-        transcript = text("", 16, WHITE);
-        content.addView(transcript);
-        addHelpSection(content, R.string.help_usage_title, getString(R.string.help_usage));
-        addHelpSection(content, R.string.help_notices_title, getString(R.string.location_explanation)
+        settings.addView(heading("音声の入出力", 19));
+        bluetoothOn = action("", SURFACE, WHITE, 80);
+        bluetoothOff = action("", SURFACE, WHITE, 80);
+        addSpaced(settings, bluetoothOn);
+        addSpaced(settings, bluetoothOff);
+        bluetoothOn.setOnClickListener(view -> selectSettings(true, selectedMovilink));
+        bluetoothOff.setOnClickListener(view -> selectSettings(false, selectedMovilink));
+        addSpaced(settings, heading("ナビ連携先", 19));
+        google = action("", SURFACE, WHITE, 88);
+        movilink = action("", SURFACE, WHITE, 88);
+        addSpaced(settings, google);
+        addSpaced(settings, movilink);
+        google.setOnClickListener(view -> selectSettings(useBluetooth, false));
+        movilink.setOnClickListener(view -> selectSettings(useBluetooth, true));
+        refreshSettings();
+        addSpaced(preparation, text("画面での操作は停車中に行ってください。", 14, MUTED));
+        addHelpSection(preparation, R.string.help_usage_title, getString(R.string.help_usage));
+        addHelpSection(preparation, R.string.help_notices_title, getString(R.string.location_explanation)
                 + "\n\n" + getString(R.string.help_notices)
                 + "\n\n" + getString(R.string.search_service_notice));
-        TextView attribution = text("", 12, MUTED);
+        TextView attribution = text("", 13, MUTED);
         attribution.setText(android.text.Html.fromHtml(getString(R.string.search_attribution), android.text.Html.FROM_HTML_MODE_LEGACY));
         attribution.setMovementMethod(LinkMovementMethod.getInstance());
         attribution.setLinkTextColor(MINT);
-        content.addView(attribution);
-        setContentView(scroll);
+        preparation.addView(attribution);
+
+        LinearLayout phase = column();
+        phase.setPadding(dp(20), dp(16), dp(20), dp(16));
+        phase.setBackground(surface(SURFACE, MINT));
+        phaseTitle = heading("", 26);
+        phaseTitle.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        phaseHint = text("", 18, WHITE);
+        phaseAudio = text("", 15, MINT);
+        phaseAudio.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        phase.addView(phaseTitle);
+        phase.addView(phaseHint);
+        phase.addView(phaseAudio);
+        sessionScreen.addView(phase);
+        candidateList = column();
+        candidateList.setVisibility(View.GONE);
+        addSpaced(sessionScreen, candidateList);
+        transcript = text("", 18, WHITE);
+        transcript.setVisibility(View.GONE);
+        addSpaced(sessionScreen, transcript);
+        locationStatus = text("", 14, MUTED);
+        locationStatus.setVisibility(View.GONE);
+        sessionScreen.addView(locationStatus);
+        sessionScreen.addView(text("音声で操作できます。画面操作は停車中に。", 14, MUTED));
+
+        sessionScreen.addView(text("「キャンセル」と話しても終了できます。", 14, MUTED));
+        start = action("▶  会話をはじめる", MINT, BACKGROUND, 88);
+        start.setContentDescription("会話をはじめる");
+        addSpaced(root, start);
+        start.setOnClickListener(view -> {
+            if (active) end("会話を終了しました。");
+            else requestStart();
+        });
+        setContentView(root);
+    }
+    private void selectSettings(boolean bluetooth, boolean movilink) {
+        if (active) return;
+        useBluetooth = bluetooth;
+        selectedMovilink = movilink;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("bluetooth", bluetooth)
+                .putBoolean("movilink", movilink).apply();
+        refreshSettings();
+    }
+    private void settingCard(Button view, String title, String detail, boolean selected) {
+        view.setText(getString(R.string.setting_card, selected ? "✓ 選択中" : "○", title, detail));
+        view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        view.setTextSize(17);
+        view.setSelected(selected);
+        view.setStateDescription(selected ? "選択中" : "未選択");
+        view.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(60, 255, 255, 255)),
+                surface(selected ? Color.rgb(27, 65, 64) : SURFACE, selected ? MINT : 0), null));
+    }
+    private void refreshSettings() {
+        settingsSummary.setText(getString(R.string.settings_summary,
+                useBluetooth ? getString(R.string.bluetooth_mode) : "スマートフォン本体を使う",
+                getString(selectedMovilink ? R.string.movilink_mode : R.string.google_mode)));
+        settingCard(bluetoothOn, "Bluetoothインカム", "接続済みインカムで話す・聞く", useBluetooth);
+        settingCard(bluetoothOff, "スマートフォン本体", "本体のマイク・スピーカーを使う", !useBluetooth);
+        settingCard(google, "Google マップ", "目的地を渡して案内へ", !selectedMovilink);
+        settingCard(movilink, "moviLink", "施設を共有・ルート操作は停車中に", selectedMovilink);
+    }
+    private void showSession(boolean showing) {
+        preparationScroll.setVisibility(showing ? View.GONE : View.VISIBLE);
+        sessionScroll.setVisibility(showing ? View.VISIBLE : View.GONE);
+        start.setText(showing ? "■  会話を終了する" : "▶  会話をはじめる");
+        start.setContentDescription(showing ? "会話を終了する" : "会話をはじめる");
+        start.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(Color.argb(60, 255, 255, 255)),
+                surface(showing ? STOP : MINT, 0), null));
+        bluetoothOn.setEnabled(!showing); bluetoothOff.setEnabled(!showing);
+        google.setEnabled(!showing); movilink.setEnabled(!showing);
+        if (showing) sessionScroll.scrollTo(0, 0);
+    }
+    private void showResult(String message) {
+        status.setText(getString(R.string.session_result, message));
+        status.setVisibility(View.VISIBLE);
+        preparationScroll.post(() -> preparationScroll.smoothScrollTo(0, 0));
+    }
+    private void phase(String title, String hint, String audio) {
+        phaseTitle.setText(title);
+        phaseHint.setText(hint);
+        phaseAudio.setText(audio);
+        phaseAudio.setVisibility(audio.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+    private void voicePhase(boolean listening) {
+        String audio = listening ? "● 聞き取り中" : "♫ 読み上げ中";
+        if (conversation.state() == Conversation.State.CHOICE) {
+            phase("≡ 候補選択中", "番号で答えてください。画面で選ぶ場合は停車中に。", audio);
+        } else if (conversation.state() == Conversation.State.CONFIRM) {
+            phase("✓ 目的地確認中", "正しければ「はい」、言い直す場合は「違う」と答えてください。", audio);
+        } else {
+            phase(listening ? "● 聞き取り中" : "♫ 読み上げ中",
+                    listening ? "目的地の施設名や住所を、地域名と一緒に話してください。" : "読み上げが終わったら話してください。", "");
+        }
     }
     private void addHelpSection(LinearLayout parent, int titleResource, String explanation) {
         String title = getString(titleResource);
@@ -170,7 +327,7 @@ public final class MainActivity extends Activity {
     private void requestStart() {
         List<String> permissions = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.RECORD_AUDIO);
-        if (bluetooth.isChecked() && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+        if (useBluetooth && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
         if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
                 && !getPreferences(MODE_PRIVATE).getBoolean("location_requested", false)) {
             permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
@@ -192,8 +349,8 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grants);
         if (requestCode != 10) return;
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-                || (bluetooth.isChecked() && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)) {
-            status.setText("マイク・インカムの権限が必要です。許可できない場合は端末設定から確認してください。");
+                || (useBluetooth && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)) {
+            showResult("マイク・インカムの権限が必要です。許可できない場合は端末設定から確認してください。");
             return;
         }
         // Permission dialogs can resume the Activity just after the callback.
@@ -201,32 +358,35 @@ public final class MainActivity extends Activity {
     }
     private void begin() {
         if (active || !foreground) return;
-        useMovilink = navigation.getCheckedRadioButtonId() == movilink.getId();
+        useMovilink = selectedMovilink;
         if (!Navigator.available(this, useMovilink)) {
-            status.setText(useMovilink ? "moviLinkの共有先が見つかりません。インストールと初期設定を確認してください。"
+            showResult(useMovilink ? "moviLinkの共有先が見つかりません。インストールと初期設定を確認してください。"
                     : "Googleマップが見つかりません。インストールと初期設定を確認してください。"); return;
         }
-        getPreferences(MODE_PRIVATE).edit().putBoolean("bluetooth", bluetooth.isChecked())
+        getPreferences(MODE_PRIVATE).edit().putBoolean("bluetooth", useBluetooth)
                 .putBoolean("movilink", useMovilink).apply();
         active = true;
         int session = ++generation;
         misses = 0;
-        start.setText("会話を終了する");
-        bluetooth.setEnabled(false); google.setEnabled(false); movilink.setEnabled(false);
-        status.setText("音声を準備しています…");
+        status.setVisibility(View.GONE);
+        transcript.setText(""); transcript.setVisibility(View.GONE);
+        locationStatus.setText(""); locationStatus.setVisibility(View.GONE);
+        showSession(true);
+        phase("◷ 音声準備中", "音声の接続が整うまでお待ちください。", "");
         conversation = new Conversation(new Conversation.Host() {
             @Override public void candidatesChanged(List<Destination> candidates) {
                 if (valid(session)) renderCandidates(session);
             }
             @Override public void prompt(String message) {
                 if (!valid(session)) return;
-                status.setText("読み上げ中");
-                transcript.setText(message);
-                speech.speak(message, () -> { if (valid(session)) { status.setText("聞き取りを開始しています…"); speech.listen(); } });
+                voicePhase(false);
+                transcript.setText(message); transcript.setVisibility(View.VISIBLE);
+                speech.speak(message, () -> { if (valid(session)) { phaseAudio.setText("聞き取りを開始しています…"); phaseAudio.setVisibility(View.VISIBLE); speech.listen(); } });
             }
             @Override public void search(String query, int request) {
                 if (!valid(session)) return;
-                status.setText("目的地を検索中…"); transcript.setText(query);
+                phase("⌕ 目的地検索中", "候補が見つかるまでお待ちください。", "");
+                transcript.setText(getString(R.string.search_query, query)); transcript.setVisibility(View.VISIBLE);
                 searchTimeout = () -> { if (valid(session)) conversation.searchFailed(request); };
                 Runnable thisTimeout = searchTimeout;
                 handler.postDelayed(thisTimeout, 20000);
@@ -263,19 +423,20 @@ public final class MainActivity extends Activity {
                         : "Googleマップに目的地を渡します。";
                 String spokenMessage = conversation.isTapSelection() ? "この目的地で案内します。"
                         : useMovilink ? "モビリンクへ施設を共有します。ルート操作は停車中におこなってください。" : message;
-                status.setText("目的地を確定しました"); transcript.setText(destination.spokenLabel());
+                phase("✓ 目的地を確定しました", message, "♫ 読み上げ中");
+                transcript.setText(destination.spokenLabel());
                 speech.speak(spokenMessage, () -> {
                     if (!valid(session)) return;
                     boolean targetMovilink = useMovilink;
                     end(message);
                     if (!Navigator.launch(MainActivity.this, destination, targetMovilink)) {
-                        status.setText("ナビアプリを開けませんでした。アプリのインストールと設定を確認してください。");
+                        showResult("ナビアプリを開けませんでした。アプリのインストールと設定を確認してください。");
                     }
                 });
             }
             @Override public void finish(String message) {
                 if (!valid(session)) return;
-                status.setText(message);
+                phase("■ 会話を終了します", message, "♫ 読み上げ中");
                 speech.speak(message, () -> { if (valid(session)) end(message); });
             }
         });
@@ -289,11 +450,11 @@ public final class MainActivity extends Activity {
                 if (!valid(session)) return;
                 handler.removeCallbacks(initTimeout);
                 try {
-                    router.open(bluetooth.isChecked(), () -> { if (valid(session)) conversation.start(); },
+                    router.open(useBluetooth, () -> { if (valid(session)) conversation.start(); },
                             message -> { if (valid(session)) end(message); });
                 } catch (RuntimeException ex) { end("音声経路を設定できませんでした。Bluetooth接続と権限を確認してください。"); }
             }
-            @Override public void listening() { if (valid(session)) status.setText("聞いています • 話してください"); }
+            @Override public void listening() { if (valid(session)) voicePhase(true); }
             @Override public void heard(String value) {
                 if (!valid(session)) return;
                 misses = 0;
@@ -311,27 +472,62 @@ public final class MainActivity extends Activity {
     }
     private void renderCandidates(int session) {
         candidateList.removeAllViews();
-        List<String> labels = conversation.candidateLabels();
-        candidateList.setVisibility(labels.isEmpty() ? View.GONE : View.VISIBLE);
-        for (int i = 0; i < labels.size(); i++) {
-            int index = i;
-            Button choice = new Button(this);
-            choice.setText(getString(R.string.candidate_button, i + 1, labels.get(i)));
-            choice.setAllCaps(false);
-            choice.setTextSize(18);
-            choice.setMinHeight(dp(80));
-            choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-            choice.setOnClickListener(view -> {
-                if (valid(session) && conversation.state() == Conversation.State.CHOICE) {
-                    misses = 0;
-                    conversation.choose(index);
-                }
-            });
-            candidateList.addView(choice, new LinearLayout.LayoutParams(-1, -2));
+        Destination selected = conversation.selected();
+        boolean confirming = conversation.state() == Conversation.State.CONFIRM && selected != null;
+        List<Destination> candidates = conversation.candidates();
+        boolean choosing = conversation.state() == Conversation.State.CHOICE && !candidates.isEmpty();
+        candidateList.setVisibility(confirming || choosing ? View.VISIBLE : View.GONE);
+        if (confirming) {
+            candidateList.addView(heading("この目的地でよろしいですか", 20));
+            candidateList.addView(heading(selected.name(), 24));
+            candidateList.addView(text(selected.address().isBlank() ? "所在地情報なし" : selected.address(), 18, WHITE));
+            if (conversation.isTapSelection()) {
+                candidateList.addView(text("確認してから案内を開始します。", 15, MUTED));
+                Button confirm = action("▶  案内する", MINT, BACKGROUND, 80);
+                confirm.setContentDescription("この目的地で案内する");
+                addSpaced(candidateList, confirm);
+                confirm.setOnClickListener(view -> {
+                    if (valid(session) && conversation.state() == Conversation.State.CONFIRM
+                            && conversation.selected() == selected) {
+                        misses = 0;
+                        conversation.confirmSelection();
+                    }
+                });
+                Button reselect = action("↶  選び直す", SURFACE, WHITE, 80);
+                addSpaced(candidateList, reselect);
+                reselect.setOnClickListener(view -> {
+                    if (valid(session) && conversation.state() == Conversation.State.CONFIRM
+                            && conversation.selected() == selected) {
+                        misses = 0;
+                        conversation.reselect();
+                    }
+                });
+            }
+        } else if (choosing) {
+            candidateList.addView(heading("目的地候補 · " + candidates.size() + "件", 20));
+            for (int i = 0; i < candidates.size(); i++) {
+                int index = i;
+                Destination destination = candidates.get(i);
+                Button choice = action(getString(R.string.candidate_button, i + 1,
+                        destination.name() + "\n" + (destination.address().isBlank() ? "所在地情報なし" : destination.address())),
+                        SURFACE, WHITE, 96);
+                choice.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                choice.setTextSize(18);
+                choice.setOnClickListener(view -> {
+                    if (valid(session) && conversation.state() == Conversation.State.CHOICE
+                            && index < conversation.candidates().size()
+                            && conversation.candidates().get(index) == destination) {
+                        misses = 0;
+                        conversation.choose(index);
+                    }
+                });
+                addSpaced(candidateList, choice);
+            }
         }
-        if (!labels.isEmpty()) candidateList.post(() -> {
-            if (valid(session) && conversation.state() == Conversation.State.CHOICE) {
-                candidateList.requestRectangleOnScreen(new Rect(0, 0, candidateList.getWidth(), candidateList.getHeight()), true);
+        if (confirming || choosing) candidateList.post(() -> {
+            if (valid(session)) {
+                // Align the beginning of the candidates, even if the list is taller than the viewport.
+                sessionScroll.smoothScrollTo(0, candidateList.getTop());
             }
         });
     }
@@ -347,9 +543,8 @@ public final class MainActivity extends Activity {
         if (router != null) { router.close(); router = null; }
         candidateList.removeAllViews();
         candidateList.setVisibility(View.GONE);
-        start.setText("会話をはじめる");
-        bluetooth.setEnabled(true); google.setEnabled(true); movilink.setEnabled(true);
-        status.setText(message);
+        showSession(false);
+        showResult(message);
     }
     @Override protected void onResume() {
         super.onResume(); foreground = true;

@@ -3,7 +3,7 @@ package jp.touringhub.assistant;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** Voice selection requires confirmation; tapping a listed candidate explicitly confirms it. */
+/** Screen and voice selections share the confirmation state; selection alone never launches navigation. */
 public final class Conversation {
     public static final int MAX_CANDIDATES = 3;
     public enum State { IDLE, DESTINATION, SEARCHING, CHOICE, CONFIRM, FINISHED }
@@ -21,11 +21,13 @@ public final class Conversation {
     private Destination selected;
     private boolean detailedConfirmation;
     private boolean selectedByTap;
+    private List<Destination> tapChoices = List.of();
     private String lastPrompt = "";
     public Conversation(Host host) { this.host = host; }
     public State state() { return state; }
     public List<Destination> candidates() { return candidates; }
     public boolean isTapSelection() { return selectedByTap; }
+    public Destination selected() { return selected; }
     public List<String> candidateLabels() {
         return candidates.stream().map(destination -> {
             String label = destination.candidateLabel();
@@ -43,8 +45,9 @@ public final class Conversation {
         candidates = List.of();
         detailedConfirmation = false;
         selectedByTap = false;
-        host.candidatesChanged(candidates);
+        tapChoices = List.of();
         state = State.DESTINATION;
+        host.candidatesChanged(candidates);
         say(text);
     }
     public void heard(String text) {
@@ -53,10 +56,7 @@ public final class Conversation {
         if (JapaneseInput.repeat(text)) { say(lastPrompt); return; }
         if (state == State.CONFIRM) {
             if (JapaneseInput.yes(text)) {
-                Destination confirmed = selected;
-                state = State.FINISHED;
-                ++request;
-                host.navigate(confirmed);
+                confirmSelection();
             } else if (JapaneseInput.no(text)) {
                 askDestination("目的地を言い直してください。地域名も付けると探しやすくなります。");
             } else {
@@ -115,22 +115,39 @@ public final class Conversation {
         Destination destination = candidates.get(index);
         boolean detailed = candidates.stream()
                 .filter(other -> other.candidateLabel().equals(destination.candidateLabel())).count() > 1;
-        if (repeat) confirm(destination, detailed);
-        else {
-            selected = destination;
-            selectedByTap = true;
-            candidates = List.of();
-            state = State.FINISHED;
-            ++request;
-            host.candidatesChanged(candidates);
-            host.navigate(destination);
-        }
+        List<Destination> choices = candidates;
+        confirm(destination, detailed, !repeat, repeat ? List.of() : choices);
+        return true;
+    }
+    public boolean confirmSelection() {
+        if (state != State.CONFIRM || selected == null) return false;
+        Destination confirmed = selected;
+        state = State.FINISHED;
+        tapChoices = List.of();
+        ++request;
+        host.candidatesChanged(List.of());
+        host.navigate(confirmed);
+        return true;
+    }
+    public boolean reselect() {
+        if (state != State.CONFIRM || !selectedByTap || tapChoices.isEmpty()) return false;
+        candidates = tapChoices;
+        tapChoices = List.of();
+        selected = null;
+        selectedByTap = false;
+        state = State.CHOICE;
+        host.candidatesChanged(candidates);
+        say("候補を番号で選んでください。" + choices());
         return true;
     }
     private void confirm(Destination destination, boolean detailed) {
+        confirm(destination, detailed, false, List.of());
+    }
+    private void confirm(Destination destination, boolean detailed, boolean byTap, List<Destination> choices) {
         selected = destination;
         detailedConfirmation = detailed;
-        selectedByTap = false;
+        selectedByTap = byTap;
+        tapChoices = choices;
         candidates = List.of();
         state = State.CONFIRM;
         host.candidatesChanged(candidates);
@@ -149,9 +166,10 @@ public final class Conversation {
         if (state == State.FINISHED) return;
         ++request;
         selected = null;
+        tapChoices = List.of();
         candidates = List.of();
-        host.candidatesChanged(candidates);
         state = State.FINISHED;
+        host.candidatesChanged(candidates);
         host.finish(text);
     }
 }
