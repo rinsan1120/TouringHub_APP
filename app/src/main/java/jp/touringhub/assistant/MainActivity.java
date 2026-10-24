@@ -121,18 +121,51 @@ public final class MainActivity extends Activity {
         candidateList.setOrientation(LinearLayout.VERTICAL);
         candidateList.setVisibility(View.GONE);
         content.addView(candidateList);
-        locationStatus = text(getString(R.string.location_explanation), 13, MUTED);
+        locationStatus = text("", 13, MUTED);
+        locationStatus.setVisibility(View.GONE);
         content.addView(locationStatus);
-        transcript = text("例：「山梨県の道の駅どうしに行きたい」\n確認：「はい」「違う」\n候補選択：「1番」／終了：「キャンセル」", 16, WHITE);
+        transcript = text("", 16, WHITE);
         content.addView(transcript);
-        TextView note = text("moviLinkは施設共有まで対応。共有後のルート操作は停車中に行ってください。\n検索候補は網羅的ではありません。復唱された施設名と住所を確認してください。\nロック・別アプリへの切替で会話を終了します。1回の会話は最大3分です。\n有料API・サブスクリプションなし。通信料は契約に従います。音声・検索語は端末のサービスに送信される場合があります。", 12, MUTED);
-        content.addView(note);
+        addHelpSection(content, R.string.help_usage_title, getString(R.string.help_usage));
+        addHelpSection(content, R.string.help_notices_title, getString(R.string.location_explanation)
+                + "\n\n" + getString(R.string.help_notices)
+                + "\n\n" + getString(R.string.search_service_notice));
         TextView attribution = text("", 12, MUTED);
         attribution.setText(android.text.Html.fromHtml(getString(R.string.search_attribution), android.text.Html.FROM_HTML_MODE_LEGACY));
         attribution.setMovementMethod(LinkMovementMethod.getInstance());
         attribution.setLinkTextColor(MINT);
         content.addView(attribution);
         setContentView(scroll);
+    }
+    private void addHelpSection(LinearLayout parent, int titleResource, String explanation) {
+        String title = getString(titleResource);
+        Button heading = new Button(this);
+        heading.setText(getString(R.string.help_closed, title));
+        heading.setTextColor(MINT);
+        heading.setTextSize(17);
+        heading.setAllCaps(false);
+        heading.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        heading.setMinHeight(dp(56));
+        heading.setPadding(dp(16), dp(8), dp(16), dp(8));
+        heading.setAccessibilityHeading(true);
+        heading.setStateDescription(getString(R.string.help_collapsed));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.rgb(24, 42, 58));
+        background.setCornerRadius(dp(12));
+        heading.setBackground(background);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.setMargins(0, dp(8), 0, 0);
+        parent.addView(heading, params);
+        TextView body = text(explanation, 13, MUTED);
+        body.setPadding(dp(16), dp(12), dp(16), dp(12));
+        body.setVisibility(View.GONE);
+        parent.addView(body);
+        heading.setOnClickListener(view -> {
+            boolean expanded = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            heading.setText(getString(expanded ? R.string.help_open : R.string.help_closed, title));
+            heading.setStateDescription(getString(expanded ? R.string.help_expanded : R.string.help_collapsed));
+        });
     }
     private void requestStart() {
         List<String> permissions = new ArrayList<>();
@@ -200,6 +233,7 @@ public final class MainActivity extends Activity {
                 nearbyLocation.get(origin -> {
                     if (!valid(session)) return;
                     locationStatus.setText(origin == null ? R.string.nearby_unavailable : R.string.nearby_ready);
+                    locationStatus.setVisibility(View.VISIBLE);
                     try {
                         resolver.search(query, origin, new DestinationResolver.Callback() {
                             @Override public void success(List<Destination> results) {
