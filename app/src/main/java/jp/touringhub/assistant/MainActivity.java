@@ -194,6 +194,20 @@ public final class MainActivity extends Activity {
         addHelpSection(preparation, R.string.help_notices_title, getString(R.string.location_explanation)
                 + "\n\n" + getString(R.string.help_notices)
                 + "\n\n" + getString(R.string.search_service_notice));
+        Button downloadUpdate = action(getString(R.string.download_update), SURFACE, MINT, 56);
+        downloadUpdate.setTextSize(17);
+        downloadUpdate.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        downloadUpdate.setContentDescription(getString(R.string.download_update_description));
+        addSpaced(preparation, downloadUpdate);
+        downloadUpdate.setOnClickListener(view -> {
+            try {
+                startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(getString(R.string.download_update_url))));
+            } catch (android.content.ActivityNotFoundException | SecurityException ex) {
+                android.widget.Toast.makeText(this, R.string.download_update_unavailable,
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
         TextView attribution = text("", 13, MUTED);
         attribution.setText(android.text.Html.fromHtml(getString(R.string.search_attribution), android.text.Html.FROM_HTML_MODE_LEGACY));
         attribution.setMovementMethod(LinkMovementMethod.getInstance());

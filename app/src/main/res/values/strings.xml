@@ -1,4 +1,8 @@
 <resources>
+    <string name="download_update">↗ 更新版をダウンロード</string>
+    <string name="download_update_description">GitHubの更新版ダウンロードページを開く</string>
+    <string name="download_update_url" translatable="false">https://github.com/rinsan1120/TouringHub_APP/releases/tag/0.0.1</string>
+    <string name="download_update_unavailable">ダウンロードページを開けませんでした。ブラウザを確認してください。</string>
     <string name="setting_card">%1$s  %2$s\n%3$s</string>
     <string name="settings_summary">音声：%1$s\nナビ：%2$s</string>
     <string name="session_result">■ 終了・お知らせ\n%1$s</string>
