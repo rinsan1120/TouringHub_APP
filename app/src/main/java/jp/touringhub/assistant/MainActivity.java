@@ -19,6 +19,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int MINT = Color.rgb(102, 227, 196);
@@ -44,8 +46,18 @@ public final class MainActivity extends Activity {
     private Button bluetoothOff;
     private Button google;
     private Button movilink;
+    private Button modelBase;
+    private Button modelSmall;
+    private Button modelDownload;
     private boolean useBluetooth;
     private boolean selectedMovilink;
+    private boolean useSmallModel;
+    private LocalRecognizer localRecognizer;
+    private WhisperModels.Size recognizerSize;
+    private ModelDownloader downloader;
+    private boolean downloadingModel;
+    private int downloadPercent;
+    private final ExecutorService modelExecutor = Executors.newSingleThreadExecutor();
     private ScrollView sessionScroll;
     private Conversation conversation;
     private SpeechSession speech;
@@ -66,6 +78,7 @@ public final class MainActivity extends Activity {
         resolver = new DestinationResolver(this);
         nearbyLocation = new NearbyLocation(this, handler);
         buildScreen();
+        ensureRecognizer();
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private TextView text(String value, int size, int color) {
@@ -115,6 +128,7 @@ public final class MainActivity extends Activity {
     private void buildScreen() {
         useBluetooth = getPreferences(MODE_PRIVATE).getBoolean("bluetooth", true);
         selectedMovilink = getPreferences(MODE_PRIVATE).getBoolean("movilink", false);
+        useSmallModel = getPreferences(MODE_PRIVATE).getBoolean("whisper_small", false);
         LinearLayout root = column();
         root.setBackgroundColor(BACKGROUND);
         root.setPadding(dp(20), dp(12), dp(20), dp(16));
@@ -188,6 +202,17 @@ public final class MainActivity extends Activity {
         addSpaced(settings, movilink);
         google.setOnClickListener(view -> selectSettings(useBluetooth, false));
         movilink.setOnClickListener(view -> selectSettings(useBluetooth, true));
+        addSpaced(settings, heading("音声認識モデル（端末内で処理）", 19));
+        modelBase = action("", SURFACE, WHITE, 80);
+        modelSmall = action("", SURFACE, WHITE, 80);
+        addSpaced(settings, modelBase);
+        addSpaced(settings, modelSmall);
+        modelBase.setOnClickListener(view -> selectModel(false));
+        modelSmall.setOnClickListener(view -> selectModel(true));
+        modelDownload = action("", SURFACE, MINT, 64);
+        modelDownload.setTextSize(17);
+        addSpaced(settings, modelDownload);
+        modelDownload.setOnClickListener(view -> startModelDownload());
         refreshSettings();
         addSpaced(preparation, text("画面での操作は停車中に行ってください。", 14, MUTED));
         addHelpSection(preparation, R.string.help_usage_title, getString(R.string.help_usage));
@@ -255,6 +280,70 @@ public final class MainActivity extends Activity {
                 .putBoolean("movilink", movilink).apply();
         refreshSettings();
     }
+    private void selectModel(boolean small) {
+        if (active || downloadingModel) return;
+        useSmallModel = small;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("whisper_small", small).apply();
+        refreshSettings();
+    }
+    private void refreshModelButton() {
+        WhisperModels.Size size = WhisperModels.size(useSmallModel);
+        if (downloadingModel) {
+            modelDownload.setText("ダウンロード中… " + downloadPercent + "%");
+            modelDownload.setEnabled(false);
+        } else if (WhisperModels.installed(getFilesDir(), size)) {
+            modelDownload.setText("✓ 認識モデル準備完了（" + (useSmallModel ? "small" : "base") + "）");
+            modelDownload.setEnabled(false);
+        } else {
+            modelDownload.setText("↓ 認識モデルをダウンロード（" + (useSmallModel ? "約375MB" : "約160MB") + "）");
+            modelDownload.setEnabled(true);
+        }
+    }
+    private void startModelDownload() {
+        if (active || downloadingModel) return;
+        WhisperModels.Size size = WhisperModels.size(useSmallModel);
+        downloadingModel = true;
+        downloadPercent = 0;
+        refreshModelButton();
+        if (downloader == null) downloader = new ModelDownloader(handler);
+        downloader.download(getFilesDir(), size, new ModelDownloader.Listener() {
+            @Override public void progress(int percent) {
+                downloadPercent = percent;
+                refreshModelButton();
+            }
+            @Override public void done() {
+                downloadingModel = false;
+                refreshSettings();
+                ensureRecognizer();
+                showResult("音声認識モデル（" + (useSmallModel ? "small" : "base") + "）をダウンロードしました。");
+            }
+            @Override public void failed(String message) {
+                downloadingModel = false;
+                refreshModelButton();
+                showResult(message);
+            }
+        });
+    }
+    private void ensureRecognizer() {
+        WhisperModels.Size size = WhisperModels.size(useSmallModel);
+        if (localRecognizer != null && recognizerSize == size) return;
+        if (!WhisperModels.installed(getFilesDir(), size)) return;
+        modelExecutor.execute(() -> {
+            LocalRecognizer created = null;
+            try {
+                created = new LocalRecognizer(WhisperModels.directory(getFilesDir(), size), size);
+            } catch (RuntimeException ex) {
+                created = null;
+            }
+            LocalRecognizer ready = created;
+            if (ready == null) return;
+            handler.post(() -> {
+                if (localRecognizer != null) localRecognizer.close();
+                localRecognizer = ready;
+                recognizerSize = size;
+            });
+        });
+    }
     private void settingCard(Button view, String title, String detail, boolean selected) {
         view.setText(getString(R.string.setting_card, selected ? "✓ 選択中" : "○", title, detail));
         view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -268,11 +357,15 @@ public final class MainActivity extends Activity {
     private void refreshSettings() {
         settingsSummary.setText(getString(R.string.settings_summary,
                 useBluetooth ? getString(R.string.bluetooth_mode) : "スマートフォン本体を使う",
-                getString(selectedMovilink ? R.string.movilink_mode : R.string.google_mode)));
+                getString(selectedMovilink ? R.string.movilink_mode : R.string.google_mode),
+                useSmallModel ? "高精度モデル（small）" : "標準モデル（base）"));
         settingCard(bluetoothOn, "Bluetoothインカム", "接続済みインカムで話す・聞く", useBluetooth);
         settingCard(bluetoothOff, "スマートフォン本体", "本体のマイク・スピーカーを使う", !useBluetooth);
         settingCard(google, "Google マップ", "目的地を渡して案内へ", !selectedMovilink);
         settingCard(movilink, "moviLink", "施設を共有・ルート操作は停車中に", selectedMovilink);
+        settingCard(modelBase, "標準モデル（base）", "約160MB・認識が速い", !useSmallModel);
+        settingCard(modelSmall, "高精度モデル（small）", "約375MB・地名の聞き取りに強い", useSmallModel);
+        refreshModelButton();
     }
     private void showSession(boolean showing) {
         preparationScroll.setVisibility(showing ? View.GONE : View.VISIBLE);
@@ -284,6 +377,9 @@ public final class MainActivity extends Activity {
                 surface(showing ? STOP : MINT, 0), null));
         bluetoothOn.setEnabled(!showing); bluetoothOff.setEnabled(!showing);
         google.setEnabled(!showing); movilink.setEnabled(!showing);
+        modelBase.setEnabled(!showing); modelSmall.setEnabled(!showing);
+        modelDownload.setEnabled(!showing && !downloadingModel
+                && !WhisperModels.installed(getFilesDir(), WhisperModels.size(useSmallModel)));
         if (showing) sessionScroll.scrollTo(0, 0);
     }
     private void showResult(String message) {
@@ -377,6 +473,16 @@ public final class MainActivity extends Activity {
             showResult(useMovilink ? "moviLinkの共有先が見つかりません。インストールと初期設定を確認してください。"
                     : "Googleマップが見つかりません。インストールと初期設定を確認してください。"); return;
         }
+        WhisperModels.Size modelSize = WhisperModels.size(useSmallModel);
+        if (!WhisperModels.installed(getFilesDir(), modelSize)) {
+            showResult("音声認識モデルが未ダウンロードです。「音声・ナビ設定を変更」を開いてダウンロードしてください。");
+            return;
+        }
+        if (localRecognizer == null || recognizerSize != modelSize) {
+            ensureRecognizer();
+            showResult("音声認識モデルを読み込み中です。数秒待ってから、もう一度開始してください。");
+            return;
+        }
         getPreferences(MODE_PRIVATE).edit().putBoolean("bluetooth", useBluetooth)
                 .putBoolean("movilink", useMovilink).apply();
         active = true;
@@ -459,7 +565,7 @@ public final class MainActivity extends Activity {
         initTimeout = () -> { if (valid(session)) end("音声の準備が時間内に完了しませんでした。音声合成設定を確認してください。"); };
         handler.postDelayed(initTimeout, 20000);
         router = new AudioRouter(MainActivity.this, handler);
-        speech = new SpeechSession(this, handler, router, new SpeechSession.Events() {
+        speech = new SpeechSession(this, handler, router, localRecognizer, new SpeechSession.Events() {
             @Override public void ready() {
                 if (!valid(session)) return;
                 handler.removeCallbacks(initTimeout);
@@ -575,6 +681,9 @@ public final class MainActivity extends Activity {
         if (active) end("会話を終了しました。");
         nearbyLocation.close();
         resolver.close();
+        if (downloader != null) { downloader.close(); downloader = null; }
+        if (localRecognizer != null) { localRecognizer.close(); localRecognizer = null; }
+        modelExecutor.shutdownNow();
         super.onDestroy();
     }
 }
