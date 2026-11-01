@@ -27,6 +27,7 @@ public final class AudioRouter implements AutoCloseable {
     private Consumer<String> failure;
     private int oldMode;
     private int targetId = -1;
+    private AudioDeviceInfo targetDevice;
     private boolean owned;
     private boolean ready;
     private boolean useBluetooth;
@@ -68,8 +69,9 @@ public final class AudioRouter implements AutoCloseable {
         }, () -> {
             if (owned) onFailure.accept("ほかの通話や音声が優先されたため、会話を終了しました。");
         });
-        // We yield focus to the recognition service during capture. Calls must still stop
-        // the conversation in that interval, without mistaking recognition's focus for a call.
+        // Focus is held across playback and recording turns; both run in this process now.
+        // A real call still changes the audio mode, which the mode listener below treats
+        // as an interruption, without mistaking our own communication mode for a call.
         modeListener = mode -> {
             if (owned && isInterruptingMode(mode, useBluetooth)) {
                 onFailure.accept("電話の着信や通話のため、会話を終了しました。");
@@ -84,6 +86,7 @@ public final class AudioRouter implements AutoCloseable {
             return;
         }
         targetId = target.getId();
+        targetDevice = target;
         routeGuard = new CommunicationRouteGuard(new CommunicationRouteGuard.Backend() {
             @Override public boolean targetAvailable() { return findTarget() != null; }
             @Override public boolean targetSelected() {
@@ -169,10 +172,17 @@ public final class AudioRouter implements AutoCloseable {
     }
     public boolean prepareRecognition() {
         if (!canUseAudio()) return false;
-        // The recognizer runs in another package and may acquire its own exclusive focus.
-        // Abandon ours before startListening; do not tear down the Bluetooth audio route.
-        focusLease.release();
+        // Recognition records in this process, under the same focus lease as playback.
+        // Keep holding the lease; do not tear down the Bluetooth audio route either.
+        if (!focusLease.acquire()) {
+            if (owned) failure.accept("音声を使用できません。ほかの音声アプリを確認してください。");
+            return false;
+        }
         return canUseAudio();
+    }
+    /** The Bluetooth communication device selected by open(), or null when using the handset. */
+    public AudioDeviceInfo communicationDevice() {
+        return useBluetooth ? targetDevice : null;
     }
     @Override public void close() {
         if (timeout != null) handler.removeCallbacks(timeout);

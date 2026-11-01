@@ -1,18 +1,18 @@
 package jp.touringhub.assistant;
 
 import android.content.Context;
-import android.content.Intent;
-import android.os.Bundle;
 import android.os.Handler;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/** Alternates TTS and one-shot recognition; never listens while speaking. */
+/**
+ * Alternates TTS and one-shot on-device recognition; never listens while speaking.
+ * Recording and recognition both run in this process: the recorder pins the Bluetooth
+ * communication device, and the local Whisper engine transcribes what it captured.
+ */
 public final class SpeechSession implements AutoCloseable {
     public interface Events {
         void ready();
@@ -25,24 +25,26 @@ public final class SpeechSession implements AutoCloseable {
     private final Context context;
     private final Events events;
     private final AudioRouter router;
+    private final LocalRecognizer recognizer;
+    private final ExecutorService inference = Executors.newSingleThreadExecutor();
     private TextToSpeech tts;
-    private SpeechRecognizer recognizer;
+    private UtteranceRecorder capture;
     private boolean closed;
     private int utterance;
+    private int captureGeneration;
     private Runnable afterSpeech;
     private Runnable speechTimeout;
     private Runnable listenTimeout;
     private boolean listening;
-    public SpeechSession(Context context, Handler handler, AudioRouter router, Events events) {
+    public SpeechSession(Context context, Handler handler, AudioRouter router,
+                         LocalRecognizer recognizer, Events events) {
         this.context = context;
         this.handler = handler;
-        this.events = events;
         this.router = router;
+        this.recognizer = recognizer;
+        this.events = events;
     }
     public void initialize() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            events.fatal("音声認識サービスがありません。Googleアプリと日本語の音声認識を準備してください。"); return;
-        }
         tts = new TextToSpeech(context, status -> handler.post(() -> {
             if (closed) return;
             if (status != TextToSpeech.SUCCESS) {
@@ -65,7 +67,7 @@ public final class SpeechSession implements AutoCloseable {
     }
     public void speak(String text, Runnable next) {
         if (closed) return;
-        destroyRecognizer();
+        stopCapture();
         if (!router.prepareSpeech() || closed) return;
         tts.setAudioAttributes(router.speechAttributes());
         if (speechTimeout != null) handler.removeCallbacks(speechTimeout);
@@ -90,70 +92,76 @@ public final class SpeechSession implements AutoCloseable {
     }
     public void listen() {
         if (closed) return;
-        destroyRecognizer();
+        stopCapture();
         if (!router.prepareRecognition() || closed) return;
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context);
-        SpeechRecognizer current = recognizer;
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            private boolean active() { return !closed && listening && recognizer == current; }
-            @Override public void onReadyForSpeech(Bundle params) { if (active()) events.listening(); }
-            @Override public void onBeginningOfSpeech() {}
-            @Override public void onRmsChanged(float rms) {}
-            @Override public void onBufferReceived(byte[] buffer) {}
-            @Override public void onEndOfSpeech() {}
-            @Override public void onPartialResults(Bundle results) {}
-            @Override public void onEvent(int type, Bundle params) {}
-            @Override public void onResults(Bundle result) {
-                if (!active()) return;
-                listening = false;
-                handler.removeCallbacks(listenTimeout);
-                ArrayList<String> texts = result.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                destroyRecognizer();
-                // Recognition has finished; protect search/confirmation and the next spoken turn.
-                if (!router.prepareSpeech() || closed) return;
-                // Only final, top-ranked recognition can confirm a destination.
-                if (texts == null || texts.isEmpty() || texts.get(0).isBlank()) events.missed();
-                else events.heard(texts.get(0));
-            }
-            @Override public void onError(int error) {
-                if (!active()) return;
-                listening = false;
-                handler.removeCallbacks(listenTimeout);
-                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                        || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) events.missed();
-                else events.fatal(error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
-                        ? "マイクの権限を許可してください。"
-                        : "音声認識が利用できません。通信状態と日本語の音声認識設定を確認してください。（" + error + "）");
-            }
-        });
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ja-JP")
-                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        if (recognizer == null) {
+            events.fatal("音声認識モデルが準備できていません。設定からモデルをダウンロードしてください。");
+            return;
+        }
+        int generation = ++captureGeneration;
         listening = true;
+        UtteranceRecorder recorder = new UtteranceRecorder(handler, router.communicationDevice());
+        capture = recorder;
         listenTimeout = () -> {
-            if (!closed && listening && recognizer == current) {
-                destroyRecognizer();
+            if (!closed && listening && generation == captureGeneration) {
+                stopCapture();
                 events.missed();
             }
         };
-        handler.postDelayed(listenTimeout, 20000);
-        try { recognizer.startListening(intent); }
-        catch (RuntimeException ex) { events.fatal("音声認識を開始できませんでした。音声認識サービスを確認してください。"); }
+        handler.postDelayed(listenTimeout, 25000);
+        recorder.start(new UtteranceRecorder.Callback() {
+            @Override public void started() {
+                if (!closed && listening && generation == captureGeneration) events.listening();
+            }
+            @Override public void captured(float[] samples) {
+                if (closed || generation != captureGeneration) return;
+                listening = false;
+                if (listenTimeout != null) handler.removeCallbacks(listenTimeout);
+                capture = null;
+                inference.execute(() -> {
+                    String text;
+                    try { text = recognizer.transcribe(samples); }
+                    catch (RuntimeException ex) { text = ""; }
+                    String result = text;
+                    handler.post(() -> {
+                        if (closed || generation != captureGeneration) return;
+                        // Recognition has finished; protect the next spoken turn.
+                        if (!router.prepareSpeech() || closed) return;
+                        if (result.isBlank()) events.missed();
+                        else events.heard(result);
+                    });
+                });
+            }
+            @Override public void noSpeech() {
+                if (closed || generation != captureGeneration) return;
+                listening = false;
+                if (listenTimeout != null) handler.removeCallbacks(listenTimeout);
+                capture = null;
+                events.missed();
+            }
+            @Override public void failed(String message) {
+                if (closed || generation != captureGeneration) return;
+                listening = false;
+                if (listenTimeout != null) handler.removeCallbacks(listenTimeout);
+                capture = null;
+                events.fatal(message);
+            }
+        });
     }
-    private void destroyRecognizer() {
+    private void stopCapture() {
+        ++captureGeneration;
         listening = false;
         if (listenTimeout != null) handler.removeCallbacks(listenTimeout);
-        SpeechRecognizer previous = recognizer;
-        recognizer = null;
-        if (previous != null) { previous.cancel(); previous.destroy(); }
+        UtteranceRecorder current = capture;
+        capture = null;
+        if (current != null) current.cancel();
     }
     @Override public void close() {
         closed = true;
         afterSpeech = null;
         if (speechTimeout != null) handler.removeCallbacks(speechTimeout);
-        destroyRecognizer();
+        stopCapture();
+        inference.shutdownNow();
         if (tts != null) { tts.stop(); tts.shutdown(); }
     }
 }

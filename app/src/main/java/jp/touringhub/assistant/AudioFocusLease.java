@@ -1,6 +1,6 @@
 package jp.touringhub.assistant;
 
-/** A focus lease for our playback, not for the external recognition service's recording. */
+/** A focus lease for our own playback and recording turns. */
 final class AudioFocusLease implements AutoCloseable {
     interface Backend {
         boolean request(Runnable onLoss);
