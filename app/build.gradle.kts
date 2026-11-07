@@ -1,4 +1,7 @@
+import java.io.File
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 plugins { id("com.android.application") }
@@ -49,12 +52,12 @@ val downloadSherpaOnnxAar by tasks.registering {
     doLast {
         if (target.isFile && sha256(target) == sherpaOnnxSha256) return@doLast
         target.parentFile.mkdirs()
-        val partial = java.io.File(target.parentFile, target.name + ".part")
+        val partial = File(target.parentFile, target.name + ".part")
         URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaOnnxVersion/sherpa-onnx-$sherpaOnnxVersion.aar")
             .toURL().openStream().use { input -> partial.outputStream().use { output -> input.copyTo(output) } }
         check(sha256(partial) == sherpaOnnxSha256) { "Downloaded sherpa-onnx AAR failed SHA-256 verification" }
-        java.nio.file.Files.move(partial.toPath(), target.toPath(),
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        Files.move(partial.toPath(), target.toPath(),
+            StandardCopyOption.REPLACE_EXISTING)
     }
 }
 tasks.named("preBuild") { dependsOn(downloadSherpaOnnxAar) }
